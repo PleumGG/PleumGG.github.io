@@ -3,89 +3,122 @@
 <head>
   <meta charset="UTF-8" />
   <title>Hand Control 3D</title>
+
   <style>
-    body { margin: 0; overflow: hidden; background: black; }
+    body {
+      margin: 0;
+      overflow: hidden;
+      background: black;
+    }
+
+    /* วิดีโอกล้อง */
     video {
-      position: absolute;
+      position: fixed;
       right: 10px;
       bottom: 10px;
       width: 160px;
       border: 2px solid white;
+      z-index: 999; /* อยู่บนสุด */
+    }
+
+    /* canvas ของ three.js */
+    canvas {
+      z-index: 1;
     }
   </style>
 </head>
+
 <body>
 
-<video id="video" autoplay playsinline></video>
+  <!-- ต้อง muted สำหรับมือถือ -->
+  <video id="video" autoplay playsinline muted></video>
 
-<script src="https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+  <!-- LIBRARIES -->
+  <script src="https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
 
-<script>
-  // ===== THREE.JS =====
-  const scene = new THREE.Scene();
-  const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
-  const renderer = new THREE.WebGLRenderer();
-  renderer.setSize(window.innerWidth, window.innerHeight);
-  document.body.appendChild(renderer.domElement);
+  <script>
+    /* ================= THREE.JS ================= */
+    const scene = new THREE.Scene();
 
-  const geometry = new THREE.BoxGeometry();
-  const material = new THREE.MeshNormalMaterial();
-  const cube = new THREE.Mesh(geometry, material);
-  scene.add(cube);
+    const camera3D = new THREE.PerspectiveCamera(
+      75,
+      window.innerWidth / window.innerHeight,
+      0.1,
+      1000
+    );
 
-  camera.position.z = 3;
+    const renderer = new THREE.WebGLRenderer({ alpha: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.body.appendChild(renderer.domElement);
 
-  function animate() {
-    requestAnimationFrame(animate);
-    renderer.render(scene, camera);
-  }
-  animate();
+    const geometry = new THREE.BoxGeometry();
+    const material = new THREE.MeshNormalMaterial();
+    const cube = new THREE.Mesh(geometry, material);
+    scene.add(cube);
 
-  // ===== MEDIAPIPE =====
-  const video = document.getElementById("video");
+    camera3D.position.z = 3;
 
-  const hands = new Hands({
-    locateFile: (file) =>
-      `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`,
-  });
-
-  hands.setOptions({
-    maxNumHands: 1,
-    modelComplexity: 1,
-    minDetectionConfidence: 0.7,
-    minTrackingConfidence: 0.7,
-  });
-
-  let lastX = null;
-
-  hands.onResults((results) => {
-    if (results.multiHandLandmarks.length > 0) {
-      const hand = results.multiHandLandmarks[0];
-      const x = hand[9].x; // จุดกลางฝ่ามือ
-
-      if (lastX !== null) {
-        const dx = x - lastX;
-
-        if (Math.abs(dx) > 0.01) {
-          cube.rotation.y += dx * 5;
-        }
-      }
-      lastX = x;
+    function animate() {
+      requestAnimationFrame(animate);
+      renderer.render(scene, camera3D);
     }
-  });
+    animate();
 
-  const cameraFeed = new Camera(video, {
-    onFrame: async () => {
-      await hands.send({ image: video });
-    },
-    width: 640,
-    height: 480,
-  });
+    window.addEventListener("resize", () => {
+      camera3D.aspect = window.innerWidth / window.innerHeight;
+      camera3D.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
 
-  cameraFeed.start();
-</script>
+    /* ================= MEDIAPIPE ================= */
+    const video = document.getElementById("video");
+
+    const hands = new Hands({
+      locateFile: (file) =>
+        `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`,
+    });
+
+    hands.setOptions({
+      maxNumHands: 1,
+      modelComplexity: 1,
+      minDetectionConfidence: 0.7,
+      minTrackingConfidence: 0.7,
+    });
+
+    let lastX = null;
+
+    hands.onResults((results) => {
+      if (results.multiHandLandmarks.length > 0) {
+        const hand = results.multiHandLandmarks[0];
+
+        // ใช้จุดกลางฝ่ามือ (landmark 9)
+        const x = hand[9].x;
+
+        if (lastX !== null) {
+          const dx = x - lastX;
+
+          if (Math.abs(dx) > 0.01) {
+            cube.rotation.y += dx * 5;
+          }
+        }
+
+        lastX = x;
+      }
+    });
+
+    const cameraFeed = new Camera(video, {
+      onFrame: async () => {
+        await hands.send({ image: video });
+      },
+      width: 640,
+      height: 480,
+      facingMode: "user", // ใช้กล้องหน้าในมือถือ
+    });
+
+    cameraFeed.start();
+  </script>
 
 </body>
 </html>
