@@ -2,42 +2,26 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Hand Control 3D (FINAL)</title>
+<title>Hand Control 3D (Gesture Control)</title>
 
 <script src="https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.min.js"></script>
 
 <style>
-body {
-  margin: 0;
-  overflow: hidden;
-  background: black;
-}
-video {
-  position: fixed;
-  right: 10px;
-  bottom: 10px;
-  width: 200px;
-  transform: scaleX(-1);
-  opacity: 0.4;
-}
-#status {
-  position: fixed;
-  left: 10px;
-  top: 10px;
-  color: white;
-  font-family: sans-serif;
-  background: rgba(0,0,0,0.6);
-  padding: 6px 10px;
-  border-radius: 6px;
+body { margin:0; overflow:hidden; background:black; }
+video{
+  position:fixed;
+  right:10px;
+  bottom:10px;
+  width:200px;
+  transform:scaleX(-1);
+  opacity:0.4;
 }
 </style>
 </head>
 
 <body>
-
-<div id="status">🟢 CONTROL ON</div>
-<video id="video" autoplay playsinline muted></video>
+<video id="video" autoplay playsinline></video>
 
 <script>
 /* ========= THREE ========= */
@@ -64,21 +48,11 @@ animate()
 /* ========= CAMERA ========= */
 const video = document.getElementById("video")
 
-async function startCamera(){
-  const stream = await navigator.mediaDevices.getUserMedia({
-    video: {
-      facingMode: "user",
-      width: { ideal: 640 },
-      height: { ideal: 480 }
-    },
-    audio: false
-  })
-
+navigator.mediaDevices.getUserMedia({ video:{ facingMode:"user" } })
+.then(stream=>{
   video.srcObject = stream
-  await new Promise(r => video.onloadedmetadata = r)
-  await video.play()
-}
-startCamera()
+  video.play()
+})
 
 /* ========= HAND ========= */
 const hands = new Hands({
@@ -86,77 +60,68 @@ const hands = new Hands({
 })
 
 hands.setOptions({
-  maxNumHands: 1,
-  modelComplexity: 0,
-  minDetectionConfidence: 0.5,
-  minTrackingConfidence: 0.5
+  maxNumHands:1,
+  modelComplexity:0,
+  minDetectionConfidence:0.5,
+  minTrackingConfidence:0.5
 })
 
-let lastX = null
-let lastY = null
-
-/* ===== TOGGLE STATE ===== */
+let lastX=null, lastY=null
 let controlEnabled = true
-let fistLocked = false
-const statusEl = document.getElementById("status")
+let fistLock = false
+let lastPinchDist = null
 
-function updateStatus(){
-  statusEl.textContent = controlEnabled ? "🟢 CONTROL ON" : "🔴 PAUSED"
+function dist(a,b){
+  return Math.hypot(a.x-b.x, a.y-b.y)
 }
 
-/* ===== FIST DETECTION ===== */
-function isFist(hand){
-  const wrist = hand[0]
-  const tips = [8,12,16,20] // ปลายนิ้ว
-  let folded = 0
-
-  for (let i of tips) {
-    const dx = hand[i].x - wrist.x
-    const dy = hand[i].y - wrist.y
-    const dist = Math.sqrt(dx*dx + dy*dy)
-    if (dist < 0.12) folded++
-  }
-  return folded >= 3
-}
-
-/* ===== MAIN LOGIC ===== */
-hands.onResults(res => {
-  if (!res.multiHandLandmarks?.length) return
-
-  const hand = res.multiHandLandmarks[0]
-
-  /* ---- TOGGLE BY FIST ---- */
-  const fist = isFist(hand)
-
-  if (fist && !fistLocked) {
-    controlEnabled = !controlEnabled
-    updateStatus()
-    fistLocked = true
+hands.onResults(res=>{
+  if(!res.multiHandLandmarks?.length){
+    lastX = lastY = null
+    lastPinchDist = null
+    return
   }
 
-  if (!fist) {
-    fistLocked = false
+  const lm = res.multiHandLandmarks[0]
+
+  const palm = lm[9]
+  const thumb = lm[4]
+  const index = lm[8]
+
+  /* ----- กำมือ = toggle ----- */
+  const fistDist = dist(thumb, index)
+
+  if(fistDist < 0.04){
+    if(!fistLock){
+      controlEnabled = !controlEnabled
+      fistLock = true
+    }
+  }else{
+    fistLock = false
   }
 
-  if (!controlEnabled) return
-
-  /* ---- CONTROL ---- */
-  const p = hand[9]
-  const x = p.x
-  const y = p.y
-
-  if (lastX !== null) {
-    cube.rotation.y += (x - lastX) * 6
-    cube.rotation.x += (y - lastY) * 6
+  /* ----- หมุน ----- */
+  if(controlEnabled && lastX !== null){
+    cube.rotation.y += (palm.x - lastX) * 6
+    cube.rotation.x += (palm.y - lastY) * 6
   }
 
-  lastX = x
-  lastY = y
+  lastX = palm.x
+  lastY = palm.y
+
+  /* ----- pinch zoom ----- */
+  const pinchDist = dist(thumb, index)
+  if(lastPinchDist !== null){
+    const delta = pinchDist - lastPinchDist
+    camera.position.z -= delta * 8
+    camera.position.z = THREE.MathUtils.clamp(camera.position.z, 2, 10)
+  }
+  lastPinchDist = pinchDist
 })
 
 /* ========= LOOP ========= */
 async function detect(){
-  if (video.readyState >= 2) {
+  if(video.readyState >= 2){
     await hands.send({ image: video })
   }
   requestAnimationFrame(detect)
@@ -164,12 +129,11 @@ async function detect(){
 detect()
 
 /* ========= RESIZE ========= */
-addEventListener("resize", () => {
+addEventListener("resize", ()=>{
   camera.aspect = innerWidth/innerHeight
   camera.updateProjectionMatrix()
   renderer.setSize(innerWidth, innerHeight)
 })
 </script>
-
 </body>
 </html>
