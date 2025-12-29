@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Hand Control 3D (Optimized)</title>
+  <title>Hand Control 3D (Position Based)</title>
 
   <style>
     body {
@@ -23,12 +23,23 @@
     canvas {
       z-index: 1;
     }
+
+    .hint {
+      position: fixed;
+      left: 10px;
+      bottom: 10px;
+      color: white;
+      font-family: sans-serif;
+      font-size: 12px;
+      opacity: 0.7;
+    }
   </style>
 </head>
 
 <body>
 
 <video id="video" autoplay playsinline muted></video>
+<div class="hint">เลื่อนมือซ้าย–ขวาเพื่อหมุนกล่อง</div>
 
 <!-- LIBRARIES -->
 <script src="https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.min.js"></script>
@@ -50,9 +61,10 @@
   renderer.setSize(window.innerWidth, window.innerHeight);
   document.body.appendChild(renderer.domElement);
 
-  const geometry = new THREE.BoxGeometry();
-  const material = new THREE.MeshNormalMaterial();
-  const cube = new THREE.Mesh(geometry, material);
+  const cube = new THREE.Mesh(
+    new THREE.BoxGeometry(),
+    new THREE.MeshNormalMaterial()
+  );
   scene.add(cube);
 
   camera3D.position.z = 3;
@@ -85,29 +97,31 @@
 
   hands.setOptions({
     maxNumHands: 1,
-    modelComplexity: 0,          // 👈 เบาสุด
+    modelComplexity: 0,          // เบาสุด
     minDetectionConfidence: 0.6,
     minTrackingConfidence: 0.6,
   });
 
-  let lastX = null;
+  // smoothing เพื่อลด jitter
+  let smoothX = 0.5;
+  const smoothFactor = 0.15;
 
   hands.onResults((results) => {
     if (results.multiHandLandmarks.length > 0) {
       const hand = results.multiHandLandmarks[0];
-      const x = hand[9].x; // จุดกลางฝ่ามือ
 
-      if (lastX !== null) {
-        const dx = x - lastX;
+      // จุดกลางฝ่ามือ
+      const x = hand[9].x; // 0 → 1
 
-        // dead zone กันมือสั่น
-        if (Math.abs(dx) > 0.03) {
-          cube.rotation.y += dx * 4;
-          needRender = true;
-        }
-      }
+      // low-pass filter
+      smoothX += (x - smoothX) * smoothFactor;
 
-      lastX = x;
+      // map ตำแหน่งมือ → มุมหมุน
+      // ซ้ายสุด = -90°, ขวาสุด = +90°
+      const rotationY = (smoothX - 0.5) * Math.PI;
+
+      cube.rotation.y = rotationY;
+      needRender = true;
     }
   });
 
@@ -115,9 +129,9 @@
     onFrame: async () => {
       await hands.send({ image: video });
     },
-    width: 320,        // 👈 ลดความละเอียด
+    width: 320,      // ลดภาระมือถือ
     height: 240,
-    facingMode: "user"
+    facingMode: "user",
   });
 
   cameraFeed.start();
