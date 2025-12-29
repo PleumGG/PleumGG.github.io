@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Hand Control 3D</title>
+  <title>Hand Control 3D (Optimized)</title>
 
   <style>
     body {
@@ -11,17 +11,15 @@
       background: black;
     }
 
-    /* วิดีโอกล้อง */
     video {
       position: fixed;
       right: 10px;
       bottom: 10px;
-      width: 160px;
+      width: 140px;
       border: 2px solid white;
-      z-index: 999; /* อยู่บนสุด */
+      z-index: 999;
     }
 
-    /* canvas ของ three.js */
     canvas {
       z-index: 1;
     }
@@ -30,95 +28,100 @@
 
 <body>
 
-  <!-- ต้อง muted สำหรับมือถือ -->
-  <video id="video" autoplay playsinline muted></video>
+<video id="video" autoplay playsinline muted></video>
 
-  <!-- LIBRARIES -->
-  <script src="https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+<!-- LIBRARIES -->
+<script src="https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
 
-  <script>
-    /* ================= THREE.JS ================= */
-    const scene = new THREE.Scene();
+<script>
+  /* ================= THREE.JS ================= */
+  const scene = new THREE.Scene();
 
-    const camera3D = new THREE.PerspectiveCamera(
-      75,
-      window.innerWidth / window.innerHeight,
-      0.1,
-      1000
-    );
+  const camera3D = new THREE.PerspectiveCamera(
+    75,
+    window.innerWidth / window.innerHeight,
+    0.1,
+    1000
+  );
 
-    const renderer = new THREE.WebGLRenderer({ alpha: true });
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    document.body.appendChild(renderer.domElement);
+  const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: false });
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  document.body.appendChild(renderer.domElement);
 
-    const geometry = new THREE.BoxGeometry();
-    const material = new THREE.MeshNormalMaterial();
-    const cube = new THREE.Mesh(geometry, material);
-    scene.add(cube);
+  const geometry = new THREE.BoxGeometry();
+  const material = new THREE.MeshNormalMaterial();
+  const cube = new THREE.Mesh(geometry, material);
+  scene.add(cube);
 
-    camera3D.position.z = 3;
+  camera3D.position.z = 3;
 
-    function animate() {
-      requestAnimationFrame(animate);
+  let needRender = true;
+
+  function animate() {
+    requestAnimationFrame(animate);
+    if (needRender) {
       renderer.render(scene, camera3D);
+      needRender = false;
     }
-    animate();
+  }
+  animate();
 
-    window.addEventListener("resize", () => {
-      camera3D.aspect = window.innerWidth / window.innerHeight;
-      camera3D.updateProjectionMatrix();
-      renderer.setSize(window.innerWidth, window.innerHeight);
-    });
+  window.addEventListener("resize", () => {
+    camera3D.aspect = window.innerWidth / window.innerHeight;
+    camera3D.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    needRender = true;
+  });
 
-    /* ================= MEDIAPIPE ================= */
-    const video = document.getElementById("video");
+  /* ================= MEDIAPIPE ================= */
+  const video = document.getElementById("video");
 
-    const hands = new Hands({
-      locateFile: (file) =>
-        `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`,
-    });
+  const hands = new Hands({
+    locateFile: (file) =>
+      `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`,
+  });
 
-    hands.setOptions({
-      maxNumHands: 1,
-      modelComplexity: 1,
-      minDetectionConfidence: 0.7,
-      minTrackingConfidence: 0.7,
-    });
+  hands.setOptions({
+    maxNumHands: 1,
+    modelComplexity: 0,          // 👈 เบาสุด
+    minDetectionConfidence: 0.6,
+    minTrackingConfidence: 0.6,
+  });
 
-    let lastX = null;
+  let lastX = null;
 
-    hands.onResults((results) => {
-      if (results.multiHandLandmarks.length > 0) {
-        const hand = results.multiHandLandmarks[0];
+  hands.onResults((results) => {
+    if (results.multiHandLandmarks.length > 0) {
+      const hand = results.multiHandLandmarks[0];
+      const x = hand[9].x; // จุดกลางฝ่ามือ
 
-        // ใช้จุดกลางฝ่ามือ (landmark 9)
-        const x = hand[9].x;
+      if (lastX !== null) {
+        const dx = x - lastX;
 
-        if (lastX !== null) {
-          const dx = x - lastX;
-
-          if (Math.abs(dx) > 0.01) {
-            cube.rotation.y += dx * 5;
-          }
+        // dead zone กันมือสั่น
+        if (Math.abs(dx) > 0.03) {
+          cube.rotation.y += dx * 4;
+          needRender = true;
         }
-
-        lastX = x;
       }
-    });
 
-    const cameraFeed = new Camera(video, {
-      onFrame: async () => {
-        await hands.send({ image: video });
-      },
-      width: 640,
-      height: 480,
-      facingMode: "user", // ใช้กล้องหน้าในมือถือ
-    });
+      lastX = x;
+    }
+  });
 
-    cameraFeed.start();
-  </script>
+  const cameraFeed = new Camera(video, {
+    onFrame: async () => {
+      await hands.send({ image: video });
+    },
+    width: 320,        // 👈 ลดความละเอียด
+    height: 240,
+    facingMode: "user"
+  });
+
+  cameraFeed.start();
+</script>
 
 </body>
 </html>
