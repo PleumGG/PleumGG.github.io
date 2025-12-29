@@ -2,13 +2,17 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Hand Control 3D (PC + MOBILE FIX)</title>
+<title>Hand Control 3D (FINAL)</title>
 
 <script src="https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.min.js"></script>
 
 <style>
-body { margin: 0; overflow: hidden; background: black; }
+body {
+  margin: 0;
+  overflow: hidden;
+  background: black;
+}
 video {
   position: fixed;
   right: 10px;
@@ -17,10 +21,22 @@ video {
   transform: scaleX(-1);
   opacity: 0.4;
 }
+#status {
+  position: fixed;
+  left: 10px;
+  top: 10px;
+  color: white;
+  font-family: sans-serif;
+  background: rgba(0,0,0,0.6);
+  padding: 6px 10px;
+  border-radius: 6px;
+}
 </style>
 </head>
 
 <body>
+
+<div id="status">🟢 CONTROL ON</div>
 <video id="video" autoplay playsinline muted></video>
 
 <script>
@@ -45,35 +61,23 @@ function animate(){
 }
 animate()
 
-/* ========= CAMERA (FIXED) ========= */
+/* ========= CAMERA ========= */
 const video = document.getElementById("video")
 
 async function startCamera(){
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: {
-        facingMode: "user",
-        width: { ideal: 640 },
-        height: { ideal: 480 }
-      },
-      audio: false
-    })
+  const stream = await navigator.mediaDevices.getUserMedia({
+    video: {
+      facingMode: "user",
+      width: { ideal: 640 },
+      height: { ideal: 480 }
+    },
+    audio: false
+  })
 
-    video.srcObject = stream
-
-    await new Promise(resolve => {
-      video.onloadedmetadata = () => resolve()
-    })
-
-    await video.play()
-    console.log("Camera started")
-
-  } catch (e) {
-    alert("เปิดกล้องไม่ได้\nลองใช้ Chrome หรือ Safari")
-    console.error(e)
-  }
+  video.srcObject = stream
+  await new Promise(r => video.onloadedmetadata = r)
+  await video.play()
 }
-
 startCamera()
 
 /* ========= HAND ========= */
@@ -91,13 +95,53 @@ hands.setOptions({
 let lastX = null
 let lastY = null
 
+/* ===== TOGGLE STATE ===== */
+let controlEnabled = true
+let fistLocked = false
+const statusEl = document.getElementById("status")
+
+function updateStatus(){
+  statusEl.textContent = controlEnabled ? "🟢 CONTROL ON" : "🔴 PAUSED"
+}
+
+/* ===== FIST DETECTION ===== */
+function isFist(hand){
+  const wrist = hand[0]
+  const tips = [8,12,16,20] // ปลายนิ้ว
+  let folded = 0
+
+  for (let i of tips) {
+    const dx = hand[i].x - wrist.x
+    const dy = hand[i].y - wrist.y
+    const dist = Math.sqrt(dx*dx + dy*dy)
+    if (dist < 0.12) folded++
+  }
+  return folded >= 3
+}
+
+/* ===== MAIN LOGIC ===== */
 hands.onResults(res => {
-  if (!res.multiHandLandmarks?.length) {
-    lastX = lastY = null
-    return
+  if (!res.multiHandLandmarks?.length) return
+
+  const hand = res.multiHandLandmarks[0]
+
+  /* ---- TOGGLE BY FIST ---- */
+  const fist = isFist(hand)
+
+  if (fist && !fistLocked) {
+    controlEnabled = !controlEnabled
+    updateStatus()
+    fistLocked = true
   }
 
-  const p = res.multiHandLandmarks[0][9]
+  if (!fist) {
+    fistLocked = false
+  }
+
+  if (!controlEnabled) return
+
+  /* ---- CONTROL ---- */
+  const p = hand[9]
   const x = p.x
   const y = p.y
 
@@ -126,5 +170,6 @@ addEventListener("resize", () => {
   renderer.setSize(innerWidth, innerHeight)
 })
 </script>
+
 </body>
 </html>
