@@ -2,28 +2,26 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Hand Control 3D</title>
+<title>Hand Control 3D (PC FIX)</title>
 
-<style>
-body { margin:0; overflow:hidden; background:black; }
-video{
-  position:fixed;
-  right:10px;
-  bottom:10px;
-  width:200px;
-  transform:scaleX(-1);
-  opacity:0.4;
-}
-</style>
-
-<!-- LOAD LIBS FIRST -->
 <script src="https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+
+<style>
+body { margin: 0; overflow: hidden; background: black; }
+video {
+  position: fixed;
+  right: 10px;
+  bottom: 10px;
+  width: 200px;
+  transform: scaleX(-1);
+  opacity: 0.4;
+}
+</style>
 </head>
 
 <body>
-<video id="video" autoplay muted playsinline></video>
+<video id="video" autoplay playsinline></video>
 
 <script>
 /* ========= THREE ========= */
@@ -47,50 +45,61 @@ function animate(){
 }
 animate()
 
-/* ========= MEDIAPIPE ========= */
+/* ========= CAMERA ========= */
 const video = document.getElementById("video")
 
+navigator.mediaDevices.getUserMedia({ video:true })
+.then(stream => {
+  video.srcObject = stream
+  video.play()
+})
+.catch(err => console.error(err))
+
+/* ========= HAND ========= */
 const hands = new Hands({
-  locateFile: f =>
-    `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`
+  locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`
 })
 
 hands.setOptions({
-  maxNumHands:1,
-  modelComplexity:0,
-  minDetectionConfidence:0.6,
-  minTrackingConfidence:0.6
+  maxNumHands: 1,
+  modelComplexity: 0,
+  minDetectionConfidence: 0.5,
+  minTrackingConfidence: 0.5
 })
 
-let lastX=null, lastY=null
+let lastX = null
+let lastY = null
 
-hands.onResults(res=>{
-  if(!res.multiHandLandmarks?.length){
+hands.onResults(res => {
+  if (!res.multiHandLandmarks?.length) {
     lastX = lastY = null
     return
   }
 
   const p = res.multiHandLandmarks[0][9]
-  if(lastX!==null){
-    cube.rotation.y += (p.x-lastX)*6
-    cube.rotation.x += (p.y-lastY)*6
+  const x = p.x
+  const y = p.y
+
+  if (lastX !== null) {
+    cube.rotation.y += (x - lastX) * 6
+    cube.rotation.x += (y - lastY) * 6
   }
-  lastX = p.x
-  lastY = p.y
+
+  lastX = x
+  lastY = y
 })
 
-/* ========= CAMERA (ถูกต้องที่สุด) ========= */
-const cam = new Camera(video,{
-  onFrame: async ()=>{
+/* ========= LOOP SEND FRAME ========= */
+async function detect(){
+  if (video.readyState >= 2) {
     await hands.send({ image: video })
-  },
-  width:640,
-  height:480
-})
-cam.start()
+  }
+  requestAnimationFrame(detect)
+}
+detect()
 
 /* ========= RESIZE ========= */
-addEventListener("resize",()=>{
+addEventListener("resize", () => {
   camera.aspect = innerWidth/innerHeight
   camera.updateProjectionMatrix()
   renderer.setSize(innerWidth, innerHeight)
