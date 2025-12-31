@@ -2,20 +2,20 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Hand Control 3D (Gesture Control)</title>
+<title>Hand Control 3D (PC FIX)</title>
 
 <script src="https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.min.js"></script>
 
 <style>
-body { margin:0; overflow:hidden; background:black; }
-video{
-  position:fixed;
-  right:10px;
-  bottom:10px;
-  width:200px;
-  transform:scaleX(-1);
-  opacity:0.4;
+body { margin: 0; overflow: hidden; background: black; }
+video {
+  position: fixed;
+  right: 10px;
+  bottom: 10px;
+  width: 200px;
+  transform: scaleX(-1);
+  opacity: 0.4;
 }
 </style>
 </head>
@@ -48,11 +48,12 @@ animate()
 /* ========= CAMERA ========= */
 const video = document.getElementById("video")
 
-navigator.mediaDevices.getUserMedia({ video:{ facingMode:"user" } })
-.then(stream=>{
+navigator.mediaDevices.getUserMedia({ video:true })
+.then(stream => {
   video.srcObject = stream
   video.play()
 })
+.catch(err => console.error(err))
 
 /* ========= HAND ========= */
 const hands = new Hands({
@@ -60,68 +61,37 @@ const hands = new Hands({
 })
 
 hands.setOptions({
-  maxNumHands:1,
-  modelComplexity:0,
-  minDetectionConfidence:0.5,
-  minTrackingConfidence:0.5
+  maxNumHands: 1,
+  modelComplexity: 0,
+  minDetectionConfidence: 0.5,
+  minTrackingConfidence: 0.5
 })
 
-let lastX=null, lastY=null
-let controlEnabled = true
-let fistLock = false
-let lastPinchDist = null
+let lastX = null
+let lastY = null
 
-function dist(a,b){
-  return Math.hypot(a.x-b.x, a.y-b.y)
-}
-
-hands.onResults(res=>{
-  if(!res.multiHandLandmarks?.length){
+hands.onResults(res => {
+  if (!res.multiHandLandmarks?.length) {
     lastX = lastY = null
-    lastPinchDist = null
     return
   }
 
-  const lm = res.multiHandLandmarks[0]
+  const p = res.multiHandLandmarks[0][9]
+  const x = p.x
+  const y = p.y
 
-  const palm = lm[9]
-  const thumb = lm[4]
-  const index = lm[8]
-
-  /* ----- กำมือ = toggle ----- */
-  const fistDist = dist(thumb, index)
-
-  if(fistDist < 0.04){
-    if(!fistLock){
-      controlEnabled = !controlEnabled
-      fistLock = true
-    }
-  }else{
-    fistLock = false
+  if (lastX !== null) {
+    cube.rotation.y += (x - lastX) * 6
+    cube.rotation.x += (y - lastY) * 6
   }
 
-  /* ----- หมุน ----- */
-  if(controlEnabled && lastX !== null){
-    cube.rotation.y += (palm.x - lastX) * 6
-    cube.rotation.x += (palm.y - lastY) * 6
-  }
-
-  lastX = palm.x
-  lastY = palm.y
-
-  /* ----- pinch zoom ----- */
-  const pinchDist = dist(thumb, index)
-  if(lastPinchDist !== null){
-    const delta = pinchDist - lastPinchDist
-    camera.position.z -= delta * 8
-    camera.position.z = THREE.MathUtils.clamp(camera.position.z, 2, 10)
-  }
-  lastPinchDist = pinchDist
+  lastX = x
+  lastY = y
 })
 
-/* ========= LOOP ========= */
+/* ========= LOOP SEND FRAME ========= */
 async function detect(){
-  if(video.readyState >= 2){
+  if (video.readyState >= 2) {
     await hands.send({ image: video })
   }
   requestAnimationFrame(detect)
@@ -129,7 +99,7 @@ async function detect(){
 detect()
 
 /* ========= RESIZE ========= */
-addEventListener("resize", ()=>{
+addEventListener("resize", () => {
   camera.aspect = innerWidth/innerHeight
   camera.updateProjectionMatrix()
   renderer.setSize(innerWidth, innerHeight)
