@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Hand Gesture Control</title>
+<title>Hand Gesture Control - Colored Cube</title>
 
 <style>
 body { margin:0; overflow:hidden; background:black; }
@@ -25,8 +25,11 @@ video{
 <video id="video" autoplay muted playsinline></video>
 
 <script>
+
 /* ========= THREE ========= */
+
 const scene = new THREE.Scene()
+
 const camera = new THREE.PerspectiveCamera(70, innerWidth/innerHeight, 0.1, 1000)
 camera.position.z = 4
 
@@ -34,10 +37,22 @@ const renderer = new THREE.WebGLRenderer({ antialias:true })
 renderer.setSize(innerWidth, innerHeight)
 document.body.appendChild(renderer.domElement)
 
+/* ====== 6 สี 6 ด้าน ====== */
+
+const materials = [
+  new THREE.MeshBasicMaterial({ color: 0xff0000 }), // ขวา (แดง)
+  new THREE.MeshBasicMaterial({ color: 0x00ff00 }), // ซ้าย (เขียว)
+  new THREE.MeshBasicMaterial({ color: 0x0000ff }), // บน (น้ำเงิน)
+  new THREE.MeshBasicMaterial({ color: 0xffff00 }), // ล่าง (เหลือง)
+  new THREE.MeshBasicMaterial({ color: 0xff00ff }), // หน้า (ม่วง)
+  new THREE.MeshBasicMaterial({ color: 0x00ffff })  // หลัง (ฟ้า)
+]
+
 const cube = new THREE.Mesh(
   new THREE.BoxGeometry(1,1,1),
-  new THREE.MeshNormalMaterial()
+  materials
 )
+
 scene.add(cube)
 
 let targetRotation = 0
@@ -45,7 +60,7 @@ let targetRotation = 0
 function animate(){
   requestAnimationFrame(animate)
 
-  // smooth rotate
+  // หมุนแบบ smooth
   cube.rotation.y += (targetRotation - cube.rotation.y) * 0.1
 
   renderer.render(scene, camera)
@@ -53,6 +68,7 @@ function animate(){
 animate()
 
 /* ========= MEDIAPIPE ========= */
+
 const video = document.getElementById("video")
 
 const hands = new Hands({
@@ -67,33 +83,20 @@ hands.setOptions({
   minTrackingConfidence:0.7
 })
 
-/* ========= GESTURE LOGIC ========= */
-
 let gestureStartTime = null
 let currentGesture = null
 let gestureLocked = false
 
 function isPalmFacingCamera(lm){
-  // เช็คคร่าว ๆ ว่าฝ่ามือหันกล้อง
-  // ดูว่า landmark กลางฝ่ามือ (9) ใกล้กล้องกว่า wrist (0)
   return lm[9].z < lm[0].z
 }
 
 function countRaisedFingers(lm){
   let count = 0
-
-  // นิ้วชี้
   if(lm[8].y < lm[6].y) count++
-
-  // นิ้วกลาง
   if(lm[12].y < lm[10].y) count++
-
-  // นิ้วนาง
   if(lm[16].y < lm[14].y) count++
-
-  // นิ้วก้อย
   if(lm[20].y < lm[18].y) count++
-
   return count
 }
 
@@ -143,6 +146,7 @@ hands.onResults(res=>{
 })
 
 /* ========= CAMERA ========= */
+
 const cam = new Camera(video,{
   onFrame: async ()=>{
     await hands.send({ image: video })
@@ -150,14 +154,17 @@ const cam = new Camera(video,{
   width:640,
   height:480
 })
+
 cam.start()
 
 /* ========= RESIZE ========= */
+
 addEventListener("resize",()=>{
   camera.aspect = innerWidth/innerHeight
   camera.updateProjectionMatrix()
   renderer.setSize(innerWidth, innerHeight)
 })
+
 </script>
 </body>
 </html>
