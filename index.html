@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Hand Control 3D</title>
+<title>Hand Gesture Control</title>
 
 <style>
 body { margin:0; overflow:hidden; background:black; }
@@ -16,7 +16,6 @@ video{
 }
 </style>
 
-<!-- LOAD LIBS FIRST -->
 <script src="https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
@@ -41,8 +40,14 @@ const cube = new THREE.Mesh(
 )
 scene.add(cube)
 
+let targetRotation = 0
+
 function animate(){
   requestAnimationFrame(animate)
+
+  // smooth rotate
+  cube.rotation.y += (targetRotation - cube.rotation.y) * 0.1
+
   renderer.render(scene, camera)
 }
 animate()
@@ -57,29 +62,87 @@ const hands = new Hands({
 
 hands.setOptions({
   maxNumHands:1,
-  modelComplexity:0,
-  minDetectionConfidence:0.6,
-  minTrackingConfidence:0.6
+  modelComplexity:1,
+  minDetectionConfidence:0.7,
+  minTrackingConfidence:0.7
 })
 
-let lastX=null, lastY=null
+/* ========= GESTURE LOGIC ========= */
+
+let gestureStartTime = null
+let currentGesture = null
+let gestureLocked = false
+
+function isPalmFacingCamera(lm){
+  // เช็คคร่าว ๆ ว่าฝ่ามือหันกล้อง
+  // ดูว่า landmark กลางฝ่ามือ (9) ใกล้กล้องกว่า wrist (0)
+  return lm[9].z < lm[0].z
+}
+
+function countRaisedFingers(lm){
+  let count = 0
+
+  // นิ้วชี้
+  if(lm[8].y < lm[6].y) count++
+
+  // นิ้วกลาง
+  if(lm[12].y < lm[10].y) count++
+
+  // นิ้วนาง
+  if(lm[16].y < lm[14].y) count++
+
+  // นิ้วก้อย
+  if(lm[20].y < lm[18].y) count++
+
+  return count
+}
 
 hands.onResults(res=>{
   if(!res.multiHandLandmarks?.length){
-    lastX = lastY = null
+    gestureStartTime = null
+    currentGesture = null
+    gestureLocked = false
     return
   }
 
-  const p = res.multiHandLandmarks[0][9]
-  if(lastX!==null){
-    cube.rotation.y += (p.x-lastX)*6
-    cube.rotation.x += (p.y-lastY)*6
+  const lm = res.multiHandLandmarks[0]
+
+  if(!isPalmFacingCamera(lm)){
+    gestureStartTime = null
+    currentGesture = null
+    gestureLocked = false
+    return
   }
-  lastX = p.x
-  lastY = p.y
+
+  const fingerCount = countRaisedFingers(lm)
+
+  let detectedGesture = null
+
+  if(fingerCount === 1) detectedGesture = "LEFT"
+  if(fingerCount === 2) detectedGesture = "RIGHT"
+
+  if(detectedGesture !== currentGesture){
+    gestureStartTime = Date.now()
+    currentGesture = detectedGesture
+    gestureLocked = false
+  }
+
+  if(detectedGesture && !gestureLocked){
+    const heldTime = Date.now() - gestureStartTime
+
+    if(heldTime > 1000){
+      if(detectedGesture === "LEFT"){
+        targetRotation -= Math.PI/2
+      }
+      if(detectedGesture === "RIGHT"){
+        targetRotation += Math.PI/2
+      }
+      gestureLocked = true
+    }
+  }
 })
 
-/* ========= CAMERA (ถูกต้องที่สุด) ========= */
+/* ========= CAMERA ========= */
 const cam = new Camera(video,{
   onFrame: async ()=>{
     await hands.send({ image: video })
