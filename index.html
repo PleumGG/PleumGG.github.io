@@ -3,19 +3,30 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Surgical Control - Anti-Shake</title>
+    <title>Surgical Debugger v4</title>
     <style>
-        body { margin:0; overflow:hidden; background:#000; font-family: sans-serif; }
-        #ui {
-            position: fixed; top: 20px; left: 20px; color: #00ffcc; z-index: 10;
-            background: rgba(0,30,30,0.8); padding: 15px; border-radius: 8px; border: 1px solid #00ffcc;
+        body { margin:0; overflow:hidden; background:#000; font-family: 'Courier New', monospace; }
+        
+        /* Debug Panel สำหรับเช็คบัค */
+        #debug-panel {
+            position: fixed; top: 10px; left: 10px; 
+            background: rgba(0, 0, 0, 0.85); color: #00ff00;
+            padding: 10px; border: 1px solid #00ff00; font-size: 12px; z-index: 100;
+            line-height: 1.4; pointer-events: none;
         }
-        #gesture-name { font-size: 26px; font-weight: bold; color: white; margin-bottom: 5px; }
-        #loading-bg { width: 100%; height: 10px; background: #111; border-radius: 5px; overflow: hidden; }
-        #loading-bar { width: 0%; height: 100%; background: #00ffcc; }
+
+        #ui {
+            position: fixed; top: 10px; right: 10px; 
+            background: rgba(0,40,40,0.9); color: #00ffcc;
+            padding: 15px; border-radius: 8px; border: 1px solid #00ffcc;
+            min-width: 200px; text-align: center;
+        }
+        #gesture-name { font-size: 24px; font-weight: bold; color: white; }
+        #loading-bar { width: 0%; height: 8px; background: #00ffcc; margin-top: 10px; transition: width 0.1s; }
+        
         video {
-            position: fixed; right: 10px; bottom: 10px; width: 150px; 
-            transform: scaleX(-1); border-radius: 8px; opacity: 0.7;
+            position: fixed; left: 10px; bottom: 10px; width: 160px; 
+            transform: scaleX(-1); border: 1px solid #333;
         }
     </style>
     <script src="https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.min.js"></script>
@@ -24,16 +35,23 @@
 </head>
 <body>
 
+    <div id="debug-panel">
+        <div>AI STATUS: <span id="ai-detecting">OFF</span></div>
+        <div>HAND SEEN: <span id="hand-label">-</span></div>
+        <div>FINGERS: <span id="finger-stat">-</span></div>
+        <hr style="border:0; border-top:1px solid #00ff00">
+        <div id="raw-coords">Waiting for data...</div>
+    </div>
+
     <div id="ui">
         <div id="gesture-name">READY</div>
-        <div id="loading-bg"><div id="loading-bar"></div></div>
-        <div style="font-size: 11px; color:#00ccaa; margin-top:8px;">Hold steady for 0.7s</div>
+        <div id="loading-bar"></div>
     </div>
 
     <video id="video" autoplay muted playsinline></video>
 
     <script>
-        /* --- 3D SCENE --- */
+        /* --- THREE.JS --- */
         const scene = new THREE.Scene();
         const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
         const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -60,46 +78,61 @@
         }
         animate();
 
-        /* --- STABLE GESTURE LOGIC --- */
+        /* --- DEBUGGER & GESTURE LOGIC --- */
         let activeGesture = "READY";
         let startTime = 0;
         let isDone = false;
 
-        function getStableGesture(lm, label) {
-            // ใช้ความสูงปลายนิ้วเทียบกับข้อต่อโคนนิ้ว (เพื่อความง่ายและแม่นยำ)
-            const isUp = (tip, base) => lm[tip].y < lm[base].y - 0.05; // -0.05 คือ buffer กันสั่น
-            const thumbUp = label === "Left" ? lm[4].x < lm[2].x - 0.03 : lm[4].x > lm[2].x + 0.03;
+        function updateDebug(label, fingers, raw) {
+            document.getElementById("ai-detecting").innerText = "ON";
+            document.getElementById("ai-detecting").style.color = "#00ff00";
+            document.getElementById("hand-label").innerText = label;
+            document.getElementById("finger-stat").innerText = 
+                (fingers.thumb?'T ':'') + (fingers.index?'I ':'') + (fingers.middle?'M ':'') + (fingers.ring?'R':'');
+            document.getElementById("raw-coords").innerText = raw;
+        }
 
-            const index = isUp(8, 5);
-            const middle = isUp(12, 9);
-            const ring = isUp(16, 13);
+        function getGesture(lm, label) {
+            // เช็คการยกนิ้ว (ปรับให้ง่ายขึ้น: ปลายนิ้วสูงกว่าข้อต่อกลางนิ้ว)
+            const f = {
+                thumb: label === "Left" ? lm[4].x < lm[2].x - 0.02 : lm[4].x > lm[2].x + 0.02,
+                index: lm[8].y < lm[6].y,
+                middle: lm[12].y < lm[10].y,
+                ring: lm[16].y < lm[14].y
+            };
+
+            const rawInfo = `T_x:${lm[4].x.toFixed(2)} I_y:${lm[8].y.toFixed(2)}`;
+            updateDebug(label, f, rawInfo);
 
             if (label === "Left") {
-                if (thumbUp && !index && !middle) return "ROTATE_LEFT";
-                if (index && !thumbUp && !middle) return "ROTATE_RIGHT";
-                if (index && middle && !ring) return "ROTATE_UP";
-                if (index && middle && ring) return "ROTATE_DOWN";
-            } else {
-                if (thumbUp && !index) return "ZOOM_IN";
-                if (index && !thumbUp) return "ZOOM_OUT";
+                if (f.thumb && !f.index && !f.middle) return "ROTATE_LEFT";
+                if (f.index && !f.thumb && !f.middle) return "ROTATE_RIGHT";
+                if (f.index && f.middle && !f.ring) return "ROTATE_UP";
+                if (f.index && f.middle && f.ring) return "ROTATE_DOWN";
+            } else if (label === "Right") {
+                if (f.thumb && !f.index) return "ZOOM_IN";
+                if (f.index && !f.thumb) return "ZOOM_OUT";
             }
             return "READY";
         }
 
         const hands = new Hands({locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`});
-        hands.setOptions({ maxNumHands: 2, modelComplexity: 1, minDetectionConfidence: 0.6, minTrackingConfidence: 0.6 });
+        hands.setOptions({ maxNumHands: 2, modelComplexity: 1, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
 
         hands.onResults(res => {
             let nowDetected = "READY";
-            if (res.multiHandLandmarks?.length) {
+
+            if (res.multiHandLandmarks && res.multiHandLandmarks.length > 0) {
                 res.multiHandLandmarks.forEach((lm, i) => {
-                    const label = res.multiHandedness[i].label;
-                    const g = getStableGesture(lm, label);
+                    const label = res.multiHandedness[i].label; // "Left" หรือ "Right"
+                    const g = getGesture(lm, label);
                     if (g !== "READY") nowDetected = g;
                 });
+            } else {
+                document.getElementById("ai-detecting").innerText = "SEARCHING...";
+                document.getElementById("ai-detecting").style.color = "red";
             }
 
-            // ถ้าเปลี่ยนท่า หรือ กลับไป READY ให้ Reset
             if (nowDetected !== activeGesture) {
                 activeGesture = nowDetected;
                 startTime = Date.now();
@@ -120,15 +153,14 @@
                     if (activeGesture === "ROTATE_DOWN") tRotX += Math.PI/2;
                     if (activeGesture === "ZOOM_IN") tZoom = Math.max(2, tZoom - 2);
                     if (activeGesture === "ZOOM_OUT") tZoom = Math.min(12, tZoom + 2);
-                    
                     isDone = true;
-                    document.getElementById("gesture-name").innerText = "ACTION DONE";
+                    document.getElementById("gesture-name").innerText = "DONE!";
                 }
             } else if (isDone) {
-                document.getElementById("gesture-name").innerText = "LOCKED: " + activeGesture;
-                document.getElementById("loading-bar").style.width = "100%";
+                document.getElementById("gesture-name").innerText = "LOCKED";
             } else {
                 document.getElementById("gesture-name").innerText = "READY";
+                document.getElementById("loading-bar").style.width = "0%";
             }
         });
 
