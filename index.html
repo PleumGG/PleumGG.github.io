@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Gesture Step Control</title>
+<title>Gesture Locked Right Hand Only</title>
 
 <style>
 body { margin:0; overflow:hidden; background:black; }
@@ -26,21 +26,25 @@ video{
 
 <script>
 
-/* ===== THREE ===== */
+/* ================= THREE ================= */
 
 const scene = new THREE.Scene()
 scene.background = new THREE.Color(0x111111)
 
 const camera = new THREE.PerspectiveCamera(70, innerWidth/innerHeight, 0.1, 1000)
 camera.position.set(2,2,6)
+camera.lookAt(0,0,0)
 
 const renderer = new THREE.WebGLRenderer({ antialias:true })
 renderer.setSize(innerWidth, innerHeight)
+renderer.shadowMap.enabled = true
 document.body.appendChild(renderer.domElement)
 
 scene.add(new THREE.AmbientLight(0xffffff, 0.6))
+
 const light = new THREE.DirectionalLight(0xffffff, 1)
 light.position.set(5,5,5)
+light.castShadow = true
 scene.add(light)
 
 const cube = new THREE.Mesh(
@@ -55,9 +59,12 @@ const cube = new THREE.Mesh(
   ]
 )
 
+cube.castShadow = true
+cube.rotation.x = 0.5
+cube.rotation.y = 0.5
 scene.add(cube)
 
-/* ===== TARGET VALUES ===== */
+/* ============== TARGET VALUES ============== */
 
 let targetRotX = cube.rotation.x
 let targetRotY = cube.rotation.y
@@ -74,7 +81,7 @@ function animate(){
 }
 animate()
 
-/* ===== MEDIAPIPE ===== */
+/* ================= MEDIAPIPE ================= */
 
 const video = document.getElementById("video")
 
@@ -94,14 +101,41 @@ let gestureStart = null
 let currentGesture = null
 let locked = false
 
-function countRaisedFingers(lm){
-  let count = 0
-  if(lm[4].x < lm[3].x) count++
-  if(lm[8].y < lm[6].y) count++
-  if(lm[12].y < lm[10].y) count++
-  if(lm[16].y < lm[14].y) count++
-  if(lm[20].y < lm[18].y) count++
-  return count
+function isRightHand(res){
+  return res.multiHandedness[0].label === "Right"
+}
+
+function isPalmFacingCamera(lm){
+  return lm[9].z < lm[0].z
+}
+
+function getGesture(lm){
+
+  const thumb  = lm[4].x < lm[3].x
+  const index  = lm[8].y < lm[6].y
+  const middle = lm[12].y < lm[10].y
+  const ring   = lm[16].y < lm[14].y
+  const pinky  = lm[20].y < lm[18].y
+
+  if(!thumb && !index && !middle && !ring && !pinky)
+    return "ZOOM_OUT"
+
+  if(!thumb && index && !middle && !ring && !pinky)
+    return "LEFT"
+
+  if(!thumb && index && middle && !ring && !pinky)
+    return "RIGHT"
+
+  if(!thumb && index && middle && ring && !pinky)
+    return "UP"
+
+  if(!thumb && index && middle && ring && pinky)
+    return "DOWN"
+
+  if(thumb && index && middle && ring && pinky)
+    return "ZOOM_IN"
+
+  return null
 }
 
 hands.onResults(res=>{
@@ -113,17 +147,13 @@ hands.onResults(res=>{
     return
   }
 
+  if(!isRightHand(res)) return
+
   const lm = res.multiHandLandmarks[0]
-  const count = countRaisedFingers(lm)
 
-  let detected = null
+  if(!isPalmFacingCamera(lm)) return
 
-  if(count === 1) detected = "LEFT"
-  if(count === 2) detected = "RIGHT"
-  if(count === 3) detected = "UP"
-  if(count === 4) detected = "DOWN"
-  if(count === 5) detected = "ZOOM_IN"
-  if(count === 0) detected = "ZOOM_OUT"
+  const detected = getGesture(lm)
 
   if(detected !== currentGesture){
     gestureStart = Date.now()
@@ -132,12 +162,12 @@ hands.onResults(res=>{
   }
 
   if(detected && !locked){
-    if(Date.now() - gestureStart > 700){
+    if(Date.now() - gestureStart > 600){
 
-      if(detected === "LEFT") targetRotY -= Math.PI/2
+      if(detected === "LEFT")  targetRotY -= Math.PI/2
       if(detected === "RIGHT") targetRotY += Math.PI/2
-      if(detected === "UP") targetRotX -= Math.PI/2
-      if(detected === "DOWN") targetRotX += Math.PI/2
+      if(detected === "UP")    targetRotX -= Math.PI/2
+      if(detected === "DOWN")  targetRotX += Math.PI/2
 
       if(detected === "ZOOM_IN"){
         targetZoom -= 1
