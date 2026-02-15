@@ -3,20 +3,19 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Surgical Precision - Fixed Step</title>
+    <title>Surgical Control - Anti-Shake</title>
     <style>
-        body { margin:0; overflow:hidden; background:#000; font-family: 'Segoe UI', sans-serif; }
+        body { margin:0; overflow:hidden; background:#000; font-family: sans-serif; }
         #ui {
             position: fixed; top: 20px; left: 20px; color: #00ffcc; z-index: 10;
-            background: rgba(0,20,20,0.9); padding: 15px; border: 1px solid #00ffcc;
-            border-radius: 4px; min-width: 220px;
+            background: rgba(0,30,30,0.8); padding: 15px; border-radius: 8px; border: 1px solid #00ffcc;
         }
-        #gesture-name { font-size: 24px; font-weight: bold; color: white; }
-        #progress-bar { width: 0%; height: 6px; background: #00ffcc; margin-top: 8px; transition: width 0.1s linear; }
-        .instruction { font-size: 10px; color: #888; margin-top: 8px; }
+        #gesture-name { font-size: 26px; font-weight: bold; color: white; margin-bottom: 5px; }
+        #loading-bg { width: 100%; height: 10px; background: #111; border-radius: 5px; overflow: hidden; }
+        #loading-bar { width: 0%; height: 100%; background: #00ffcc; }
         video {
-            position: fixed; right: 10px; bottom: 10px; width: 140px; 
-            transform: scaleX(-1); border-radius: 8px; border: 1px solid #333;
+            position: fixed; right: 10px; bottom: 10px; width: 150px; 
+            transform: scaleX(-1); border-radius: 8px; opacity: 0.7;
         }
     </style>
     <script src="https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.min.js"></script>
@@ -26,35 +25,29 @@
 <body>
 
     <div id="ui">
-        <div style="font-size: 12px; color: #00ffcc;">SURGICAL SYSTEM v3</div>
         <div id="gesture-name">READY</div>
-        <div id="progress-bar"></div>
-        <div class="instruction">
-            L-Hand: T=Left, I=Right, 2F=Up, 3F=Down<br>
-            R-Hand: T=Zoom In, I=Zoom Out<br>
-            <b style="color:#ffcc00">RELEASE HAND TO RESET AFTER ACTION</b>
-        </div>
+        <div id="loading-bg"><div id="loading-bar"></div></div>
+        <div style="font-size: 11px; color:#00ccaa; margin-top:8px;">Hold steady for 0.7s</div>
     </div>
 
     <video id="video" autoplay muted playsinline></video>
 
     <script>
-        /* --- THREE.JS --- */
+        /* --- 3D SCENE --- */
         const scene = new THREE.Scene();
         const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
         const renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
         document.body.appendChild(renderer.domElement);
 
-        const light = new THREE.DirectionalLight(0xffffff, 1.5);
-        light.position.set(5, 5, 5);
-        scene.add(light, new THREE.AmbientLight(0xffffff, 0.3));
-
         const cube = new THREE.Mesh(
             new THREE.BoxGeometry(2, 2, 2),
             [0xff0000, 0x00ff00, 0x0000ff, 0xffff00, 0xff00ff, 0x00ffff].map(c => new THREE.MeshStandardMaterial({color: c}))
         );
-        scene.add(cube);
+        scene.add(cube, new THREE.AmbientLight(0xffffff, 0.5));
+        const light = new THREE.DirectionalLight(0xffffff, 1);
+        light.position.set(5, 5, 5);
+        scene.add(light);
         camera.position.z = 6;
 
         let tRotX = 0, tRotY = 0, tZoom = 6;
@@ -67,83 +60,82 @@
         }
         animate();
 
-        /* --- LOGIC --- */
-        let currentGesture = "READY";
-        let gestureStartTime = 0;
-        let isLocked = false; // ตัวล็อค Action
+        /* --- STABLE GESTURE LOGIC --- */
+        let activeGesture = "READY";
+        let startTime = 0;
+        let isDone = false;
 
-        function getHandGesture(lm, label) {
-            const dist = (p1, p2) => Math.sqrt(Math.pow(lm[p1].x - lm[p2].x, 2) + Math.pow(lm[p1].y - lm[p2].y, 2));
-            const isUp = (tip, base) => lm[tip].y < lm[base].y;
+        function getStableGesture(lm, label) {
+            // ใช้ความสูงปลายนิ้วเทียบกับข้อต่อโคนนิ้ว (เพื่อความง่ายและแม่นยำ)
+            const isUp = (tip, base) => lm[tip].y < lm[base].y - 0.05; // -0.05 คือ buffer กันสั่น
+            const thumbUp = label === "Left" ? lm[4].x < lm[2].x - 0.03 : lm[4].x > lm[2].x + 0.03;
 
-            const thumb = dist(4, 17) > dist(2, 17) * 1.2;
-            const index = isUp(8, 6);
-            const middle = isUp(12, 10);
-            const ring = isUp(16, 14);
+            const index = isUp(8, 5);
+            const middle = isUp(12, 9);
+            const ring = isUp(16, 13);
 
             if (label === "Left") {
-                if (thumb && !index && !middle) return "LEFT";
-                if (!thumb && index && !middle) return "RIGHT";
-                if (index && middle && !ring) return "UP";
-                if (index && middle && ring) return "DOWN";
+                if (thumbUp && !index && !middle) return "ROTATE_LEFT";
+                if (index && !thumbUp && !middle) return "ROTATE_RIGHT";
+                if (index && middle && !ring) return "ROTATE_UP";
+                if (index && middle && ring) return "ROTATE_DOWN";
             } else {
-                if (thumb && !index) return "ZOOM_IN";
-                if (!thumb && index) return "ZOOM_OUT";
+                if (thumbUp && !index) return "ZOOM_IN";
+                if (index && !thumbUp) return "ZOOM_OUT";
             }
             return "READY";
         }
 
         const hands = new Hands({locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`});
-        hands.setOptions({ maxNumHands: 2, minDetectionConfidence: 0.8, minTrackingConfidence: 0.8 });
+        hands.setOptions({ maxNumHands: 2, modelComplexity: 1, minDetectionConfidence: 0.6, minTrackingConfidence: 0.6 });
 
         hands.onResults(res => {
-            let detected = "READY";
+            let nowDetected = "READY";
             if (res.multiHandLandmarks?.length) {
                 res.multiHandLandmarks.forEach((lm, i) => {
                     const label = res.multiHandedness[i].label;
-                    const g = getHandGesture(lm, label);
-                    if (g !== "READY") detected = g;
+                    const g = getStableGesture(lm, label);
+                    if (g !== "READY") nowDetected = g;
                 });
             }
 
-            if (detected !== currentGesture) {
-                currentGesture = detected;
-                gestureStartTime = Date.now();
-                isLocked = false; // ปลดล็อคเมื่อเปลี่ยนท่า
-                document.getElementById("progress-bar").style.width = "0%";
+            // ถ้าเปลี่ยนท่า หรือ กลับไป READY ให้ Reset
+            if (nowDetected !== activeGesture) {
+                activeGesture = nowDetected;
+                startTime = Date.now();
+                isDone = false;
+                document.getElementById("loading-bar").style.width = "0%";
             }
 
-            if (currentGesture !== "READY" && !isLocked) {
-                const elapsed = Date.now() - gestureStartTime;
+            if (activeGesture !== "READY" && !isDone) {
+                const elapsed = Date.now() - startTime;
                 const progress = Math.min((elapsed / 700) * 100, 100);
-                document.getElementById("progress-bar").style.width = progress + "%";
-                document.getElementById("gesture-name").innerText = currentGesture;
+                document.getElementById("loading-bar").style.width = progress + "%";
+                document.getElementById("gesture-name").innerText = activeGesture;
 
                 if (elapsed >= 700) {
-                    // ทำงานแค่ครั้งเดียว
-                    if (currentGesture === "LEFT") tRotY -= Math.PI/2;
-                    if (currentGesture === "RIGHT") tRotY += Math.PI/2;
-                    if (currentGesture === "UP") tRotX -= Math.PI/2;
-                    if (currentGesture === "DOWN") tRotX += Math.PI/2;
-                    if (currentGesture === "ZOOM_IN") tZoom = Math.max(2, tZoom - 1.5);
-                    if (currentGesture === "ZOOM_OUT") tZoom = Math.min(12, tZoom + 1.5);
+                    if (activeGesture === "ROTATE_LEFT") tRotY -= Math.PI/2;
+                    if (activeGesture === "ROTATE_RIGHT") tRotY += Math.PI/2;
+                    if (activeGesture === "ROTATE_UP") tRotX -= Math.PI/2;
+                    if (activeGesture === "ROTATE_DOWN") tRotX += Math.PI/2;
+                    if (activeGesture === "ZOOM_IN") tZoom = Math.max(2, tZoom - 2);
+                    if (activeGesture === "ZOOM_OUT") tZoom = Math.min(12, tZoom + 2);
                     
-                    isLocked = true; // ล็อคทันทีหลังจากสั่งงาน
-                    document.getElementById("gesture-name").innerText = "EXECUTED";
+                    isDone = true;
+                    document.getElementById("gesture-name").innerText = "ACTION DONE";
                 }
-            } else if (isLocked) {
-                document.getElementById("progress-bar").style.width = "100%";
-                document.getElementById("gesture-name").innerText = "LOCKED (RELEASE)";
+            } else if (isDone) {
+                document.getElementById("gesture-name").innerText = "LOCKED: " + activeGesture;
+                document.getElementById("loading-bar").style.width = "100%";
             } else {
                 document.getElementById("gesture-name").innerText = "READY";
             }
         });
 
-        const cam = new Camera(document.getElementById("video"), {
+        new Camera(document.getElementById("video"), {
             onFrame: async () => { await hands.send({image: document.getElementById("video")}); },
-            width: 480, height: 360
-        });
-        cam.start();
+            width: 640, height: 480
+        }).start();
     </script>
 </body>
 </html>
