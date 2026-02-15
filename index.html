@@ -1,217 +1,203 @@
 <!DOCTYPE html>
 <html>
 <head>
-<meta charset="UTF-8">
-<title>Gesture Locked Right Hand Only</title>
+    <meta charset="UTF-8">
+    <title>Medical Hand Tracking Interface (Demo)</title>
+    <style>
+        body { margin:0; overflow:hidden; background:#0a0a0a; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        
+        /* UI แถบสถานะแบบ Medical Look */
+        #ui-layer {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            color: #00ffcc;
+            z-index: 10;
+            pointer-events: none;
+        }
+        .status-box {
+            background: rgba(0, 40, 40, 0.7);
+            padding: 15px;
+            border-left: 4px solid #00ffcc;
+            border-radius: 4px;
+            min-width: 250px;
+        }
+        .gesture-name { font-size: 24px; font-weight: bold; color: white; margin-top: 5px; }
+        .hint { font-size: 12px; color: #aaa; margin-top: 10px; }
 
-<style>
-body { margin:0; overflow:hidden; background:black; }
+        video {
+            position: fixed;
+            right: 20px;
+            bottom: 20px;
+            width: 240px;
+            height: 180px;
+            transform: scaleX(-1);
+            border: 2px solid #333;
+            border-radius: 8px;
+            opacity: 0.8;
+        }
+    </style>
 
-video{
-  position:fixed;
-  right:10px;
-  bottom:10px;
-  width:200px;
-  transform:scaleX(-1); /* mirror ภาพ */
-  opacity:1;
-}
-</style>
-
-<script src="https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
 </head>
 
 <body>
-<video id="video" autoplay muted playsinline></video>
+    <div id="ui-layer">
+        <div class="status-box">
+            <div>SURGICAL VIEW: <span style="color:#00ffcc">ACTIVE</span></div>
+            <div id="gesture-display" class="gesture-name">WAITING...</div>
+            <div id="lock-timer" style="height:4px; background:#00ffcc; width:0%; margin-top:10px; transition:width 0.1s"></div>
+            <div class="hint">
+                1 Finger: Rotate Left | 2 Fingers: Rotate Right <br>
+                3 Fingers: Rotate Up | 4 Fingers: Rotate Down <br>
+                Open Palm: Zoom In | Fist: Zoom Out
+            </div>
+        </div>
+    </div>
 
-<script>
+    <video id="video" autoplay muted playsinline></video>
 
-/* ================= THREE ================= */
+    <script>
+        /* ================= THREE.JS (The 3D Scene) ================= */
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x050505);
 
-const scene = new THREE.Scene()
-scene.background = new THREE.Color(0x111111)
+        const camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.1, 1000);
+        camera.position.set(0, 0, 6);
 
-const camera = new THREE.PerspectiveCamera(70, innerWidth/innerHeight, 0.1, 1000)
-camera.position.set(2,2,6)
-camera.lookAt(0,0,0)
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        document.body.appendChild(renderer.domElement);
 
-const renderer = new THREE.WebGLRenderer({ antialias:true })
-renderer.setSize(innerWidth, innerHeight)
-renderer.shadowMap.enabled = true
-document.body.appendChild(renderer.domElement)
+        // แสงแบบทางการแพทย์ (สว่างและเคลียร์)
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+        scene.add(ambientLight);
+        const pointLight = new THREE.PointLight(0xffffff, 1);
+        pointLight.position.set(5, 5, 5);
+        scene.add(pointLight);
 
-scene.add(new THREE.AmbientLight(0xffffff, 0.6))
+        // สร้างโมเดลจำลองอวัยวะ (ใช้ Cube หลายสีแทนไปก่อน)
+        const geometry = new THREE.BoxGeometry(1.5, 1.5, 1.5);
+        const materials = [
+            new THREE.MeshStandardMaterial({ color: 0xff3333 }), // Red
+            new THREE.MeshStandardMaterial({ color: 0x33ff33 }), // Green
+            new THREE.MeshStandardMaterial({ color: 0x3333ff }), // Blue
+            new THREE.MeshStandardMaterial({ color: 0xffff33 }), // Yellow
+            new THREE.MeshStandardMaterial({ color: 0xff33ff }), // Pink
+            new THREE.MeshStandardMaterial({ color: 0x33ffff })  // Cyan
+        ];
+        const cube = new THREE.Mesh(geometry, materials);
+        scene.add(cube);
 
-const light = new THREE.DirectionalLight(0xffffff, 1)
-light.position.set(5,5,5)
-light.castShadow = true
-scene.add(light)
+        /* ============== CONTROL LOGIC ============== */
+        let targetRotX = 0, targetRotY = 0, targetZoom = 6;
+        const gestureDisplay = document.getElementById("gesture-display");
+        const lockBar = document.getElementById("lock-timer");
 
-const cube = new THREE.Mesh(
-  new THREE.BoxGeometry(1,1,1),
-  [
-    new THREE.MeshStandardMaterial({ color:0xff0000 }),
-    new THREE.MeshStandardMaterial({ color:0x00ff00 }),
-    new THREE.MeshStandardMaterial({ color:0x0000ff }),
-    new THREE.MeshStandardMaterial({ color:0xffff00 }),
-    new THREE.MeshStandardMaterial({ color:0xff00ff }),
-    new THREE.MeshStandardMaterial({ color:0x00ffff })
-  ]
-)
+        function animate() {
+            requestAnimationFrame(animate);
+            cube.rotation.x += (targetRotX - cube.rotation.x) * 0.1;
+            cube.rotation.y += (targetRotY - cube.rotation.y) * 0.1;
+            camera.position.z += (targetZoom - camera.position.z) * 0.1;
+            renderer.render(scene, camera);
+        }
+        animate();
 
-cube.castShadow = true
-cube.rotation.x = 0.5
-cube.rotation.y = 0.5
-scene.add(cube)
+        /* ================= MEDIAPIPE (Hand Tracking) ================= */
+        const video = document.getElementById("video");
+        let gestureStart = null;
+        let currentGesture = null;
+        let isLocked = false;
 
-/* ============== TARGET VALUES ============== */
+        function getGesture(lm) {
+            // เช็คว่านิ้ว "ตั้งขึ้น" จริงไหม โดยเทียบปลายนิ้วกับข้อต่อที่ 3 ของนิ้วนั้นๆ
+            const indexUp  = lm[8].y < lm[6].y;
+            const middleUp = lm[12].y < lm[10].y;
+            const ringUp   = lm[16].y < lm[14].y;
+            const pinkyUp  = lm[20].y < lm[18].y;
+            const thumbUp  = lm[4].x > lm[3].x; // เฉพาะมือขวาที่ mirror แล้ว
 
-let targetRotX = cube.rotation.x
-let targetRotY = cube.rotation.y
-let targetZoom = camera.position.z
+            if (indexUp && !middleUp && !ringUp && !pinkyUp) return "ROTATE_LEFT";
+            if (indexUp && middleUp && !ringUp && !pinkyUp) return "ROTATE_RIGHT";
+            if (indexUp && middleUp && ringUp && !pinkyUp) return "ROTATE_UP";
+            if (indexUp && middleUp && ringUp && pinkyUp && !thumbUp) return "ROTATE_DOWN";
+            if (indexUp && middleUp && ringUp && pinkyUp && thumbUp) return "ZOOM_IN";
+            if (!indexUp && !middleUp && !ringUp && !pinkyUp) return "ZOOM_OUT";
+            
+            return "READY";
+        }
 
-function animate(){
-  requestAnimationFrame(animate)
+        const hands = new Hands({
+            locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+        });
 
-  cube.rotation.x += (targetRotX - cube.rotation.x) * 0.2
-  cube.rotation.y += (targetRotY - cube.rotation.y) * 0.2
-  camera.position.z += (targetZoom - camera.position.z) * 0.2
+        hands.setOptions({
+            maxNumHands: 1,
+            modelComplexity: 1,
+            minDetectionConfidence: 0.8,
+            minTrackingConfidence: 0.8
+        });
 
-  renderer.render(scene, camera)
-}
-animate()
+        hands.onResults(results => {
+            if (!results.multiHandLandmarks || results.multiHandLandmarks.length === 0) {
+                gestureDisplay.innerText = "NO HAND DETECTED";
+                lockBar.style.width = "0%";
+                return;
+            }
 
-/* ================= MEDIAPIPE ================= */
+            // ตรวจสอบว่าเป็นมือขวาเท่านั้น (Label จะสลับกันเพราะเรา Mirror ภาพ)
+            const handLabel = results.multiHandedness[0].label;
+            if(handLabel === "Right") { // ในที่นี้ MediaPipe สลับ Left/Right ให้แล้วตามกล้อง
+                const lm = results.multiHandLandmarks[0];
+                const detected = getGesture(lm);
 
-const video = document.getElementById("video")
+                if (detected !== currentGesture) {
+                    currentGesture = detected;
+                    gestureStart = Date.now();
+                    isLocked = false;
+                }
 
-const hands = new Hands({
-  locateFile: f =>
-  `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`
-})
+                if (detected !== "READY" && !isLocked) {
+                    const elapsed = Date.now() - gestureStart;
+                    const progress = Math.min((elapsed / 600) * 100, 100);
+                    lockBar.style.width = progress + "%";
+                    gestureDisplay.innerText = "HOLDING: " + detected;
 
-hands.setOptions({
-  maxNumHands:1,
-  modelComplexity:1,
-  minDetectionConfidence:0.7,
-  minTrackingConfidence:0.7
-})
+                    if (elapsed > 600) {
+                        if (detected === "ROTATE_LEFT")  targetRotY -= Math.PI/2;
+                        if (detected === "ROTATE_RIGHT") targetRotY += Math.PI/2;
+                        if (detected === "ROTATE_UP")    targetRotX -= Math.PI/2;
+                        if (detected === "ROTATE_DOWN")  targetRotX += Math.PI/2;
+                        if (detected === "ZOOM_IN")      targetZoom = Math.max(2, targetZoom - 1.5);
+                        if (detected === "ZOOM_OUT")     targetZoom = Math.min(12, targetZoom + 1.5);
 
-let gestureStart = null
-let currentGesture = null
-let locked = false
+                        isLocked = true;
+                        gestureDisplay.innerText = "EXECUTED!";
+                        setTimeout(() => { isLocked = false; gestureStart = Date.now(); }, 1000); 
+                    }
+                } else if (isLocked) {
+                    lockBar.style.width = "100%";
+                } else {
+                    gestureDisplay.innerText = "SYSTEM READY";
+                    lockBar.style.width = "0%";
+                }
+            }
+        });
 
-function isRightHand(res){
-  return res.multiHandedness[0].label === "Right"
-}
+        const cameraFeed = new Camera(video, {
+            onFrame: async () => { await hands.send({image: video}); },
+            width: 640, height: 480
+        });
+        cameraFeed.start();
 
-function isPalmFacingCamera(lm){
-  return lm[9].z < lm[0].z
-}
-
-/* 🔥 แก้ปัญหา mirror ตรงนี้ */
-function mirrorLandmarks(lm){
-  return lm.map(p => ({
-    ...p,
-    x: 1 - p.x
-  }))
-}
-
-function getGesture(lm){
-
-  const thumb  = lm[4].x < lm[3].x
-  const index  = lm[8].y < lm[6].y
-  const middle = lm[12].y < lm[10].y
-  const ring   = lm[16].y < lm[14].y
-  const pinky  = lm[20].y < lm[18].y
-
-  if(!thumb && !index && !middle && !ring && !pinky)
-    return "ZOOM_OUT"
-
-  if(!thumb && index && !middle && !ring && !pinky)
-    return "LEFT"
-
-  if(!thumb && index && middle && !ring && !pinky)
-    return "RIGHT"
-
-  if(!thumb && index && middle && ring && !pinky)
-    return "UP"
-
-  if(!thumb && index && middle && ring && pinky)
-    return "DOWN"
-
-  if(thumb && index && middle && ring && pinky)
-    return "ZOOM_IN"
-
-  return null
-}
-
-hands.onResults(res=>{
-
-  if(!res.multiHandLandmarks?.length){
-    gestureStart = null
-    currentGesture = null
-    locked = false
-    return
-  }
-
-  if(!isRightHand(res)) return
-
-  const lmRaw = res.multiHandLandmarks[0]
-
-  /* 🔥 ใช้ landmark ที่ mirror แล้ว */
-  const lm = mirrorLandmarks(lmRaw)
-
-  if(!isPalmFacingCamera(lm)) return
-
-  const detected = getGesture(lm)
-
-  if(detected !== currentGesture){
-    gestureStart = Date.now()
-    currentGesture = detected
-    locked = false
-  }
-
-  if(detected && !locked){
-    if(Date.now() - gestureStart > 600){
-
-      if(detected === "LEFT")  targetRotY -= Math.PI/2
-      if(detected === "RIGHT") targetRotY += Math.PI/2
-      if(detected === "UP")    targetRotX -= Math.PI/2
-      if(detected === "DOWN")  targetRotX += Math.PI/2
-
-      if(detected === "ZOOM_IN"){
-        targetZoom -= 1
-        if(targetZoom < 2) targetZoom = 2
-      }
-
-      if(detected === "ZOOM_OUT"){
-        targetZoom += 1
-        if(targetZoom > 12) targetZoom = 12
-      }
-
-      locked = true
-    }
-  }
-
-})
-
-const cam = new Camera(video,{
-  onFrame: async ()=>{
-    await hands.send({ image: video })
-  },
-  width:640,
-  height:480
-})
-cam.start()
-
-addEventListener("resize",()=>{
-  camera.aspect = innerWidth/innerHeight
-  camera.updateProjectionMatrix()
-  renderer.setSize(innerWidth, innerHeight)
-})
-
-</script>
+        window.addEventListener("resize", () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
 </body>
 </html>
