@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Hand Gesture Control - Real 3D</title>
+<title>Hand Gesture Control - REAL 3D FIXED</title>
 
 <style>
 body { margin:0; overflow:hidden; background:black; }
@@ -17,6 +17,7 @@ video{
 </style>
 
 <script src="https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.158.0/examples/js/controls/OrbitControls.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
 </head>
@@ -30,38 +31,43 @@ video{
 
 const scene = new THREE.Scene()
 scene.background = new THREE.Color(0x111111)
+scene.fog = new THREE.Fog(0x111111, 5, 20) // เพิ่ม depth
 
-const camera = new THREE.PerspectiveCamera(70, innerWidth/innerHeight, 0.1, 1000)
-camera.position.set(2,2,4) // มองเฉียง
-camera.lookAt(0,0,0)
+const camera = new THREE.PerspectiveCamera(75, innerWidth/innerHeight, 0.1, 1000)
+camera.position.set(4,3,6)
 
 const renderer = new THREE.WebGLRenderer({ antialias:true })
 renderer.setSize(innerWidth, innerHeight)
 renderer.shadowMap.enabled = true
 document.body.appendChild(renderer.domElement)
 
-/* ===== ไฟ ===== */
+/* ===== OrbitControls ===== */
+const controls = new THREE.OrbitControls(camera, renderer.domElement)
+controls.enableDamping = true
 
-const ambientLight = new THREE.AmbientLight(0xffffff, 0.4)
-scene.add(ambientLight)
+/* ===== Lights ===== */
 
-const directionalLight = new THREE.DirectionalLight(0xffffff, 1)
-directionalLight.position.set(5,5,5)
-directionalLight.castShadow = true
-scene.add(directionalLight)
+scene.add(new THREE.AmbientLight(0xffffff, 0.4))
 
-/* ===== พื้น ===== */
+const dirLight = new THREE.DirectionalLight(0xffffff, 1.2)
+dirLight.position.set(5,10,5)
+dirLight.castShadow = true
+scene.add(dirLight)
 
+/* ===== Grid ===== */
+const grid = new THREE.GridHelper(20,20)
+scene.add(grid)
+
+/* ===== Floor ===== */
 const plane = new THREE.Mesh(
-  new THREE.PlaneGeometry(10,10),
+  new THREE.PlaneGeometry(30,30),
   new THREE.MeshStandardMaterial({ color:0x222222 })
 )
 plane.rotation.x = -Math.PI/2
-plane.position.y = -1
 plane.receiveShadow = true
 scene.add(plane)
 
-/* ===== กล่อง 6 สี ===== */
+/* ===== Cube ===== */
 
 const materials = [
   new THREE.MeshStandardMaterial({ color: 0xff0000 }),
@@ -78,19 +84,19 @@ const cube = new THREE.Mesh(
 )
 
 cube.castShadow = true
-cube.position.y = 0
-cube.rotation.x = 0.4
-cube.rotation.y = 0.6
-
+cube.position.y = 0.5
 scene.add(cube)
 
-let targetRotation = cube.rotation.y
+let targetRotationY = cube.rotation.y
+let targetRotationX = cube.rotation.x
 
 function animate(){
   requestAnimationFrame(animate)
 
-  cube.rotation.y += (targetRotation - cube.rotation.y) * 0.1
+  cube.rotation.y += (targetRotationY - cube.rotation.y) * 0.1
+  cube.rotation.x += (targetRotationX - cube.rotation.x) * 0.1
 
+  controls.update()
   renderer.render(scene, camera)
 }
 animate()
@@ -150,6 +156,8 @@ hands.onResults(res=>{
   let detectedGesture = null
   if(fingerCount === 1) detectedGesture = "LEFT"
   if(fingerCount === 2) detectedGesture = "RIGHT"
+  if(fingerCount === 3) detectedGesture = "UP"
+  if(fingerCount === 4) detectedGesture = "DOWN"
 
   if(detectedGesture !== currentGesture){
     gestureStartTime = Date.now()
@@ -160,13 +168,13 @@ hands.onResults(res=>{
   if(detectedGesture && !gestureLocked){
     const heldTime = Date.now() - gestureStartTime
 
-    if(heldTime > 1000){
-      if(detectedGesture === "LEFT"){
-        targetRotation -= Math.PI/2
-      }
-      if(detectedGesture === "RIGHT"){
-        targetRotation += Math.PI/2
-      }
+    if(heldTime > 800){
+
+      if(detectedGesture === "LEFT")  targetRotationY -= Math.PI/2
+      if(detectedGesture === "RIGHT") targetRotationY += Math.PI/2
+      if(detectedGesture === "UP")    targetRotationX -= Math.PI/4
+      if(detectedGesture === "DOWN")  targetRotationX += Math.PI/4
+
       gestureLocked = true
     }
   }
