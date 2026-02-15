@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Gesture Locked Right Hand Only</title>
+<title>Gesture Controlled OR Prototype</title>
 
 <style>
 body { margin:0; overflow:hidden; background:black; }
@@ -12,7 +12,7 @@ video{
   right:10px;
   bottom:10px;
   width:200px;
-  transform:scaleX(-1); /* mirror ภาพ */
+  transform:scaleX(-1);
   opacity:1;
 }
 </style>
@@ -38,14 +38,12 @@ camera.lookAt(0,0,0)
 
 const renderer = new THREE.WebGLRenderer({ antialias:true })
 renderer.setSize(innerWidth, innerHeight)
-renderer.shadowMap.enabled = true
 document.body.appendChild(renderer.domElement)
 
 scene.add(new THREE.AmbientLight(0xffffff, 0.6))
 
 const light = new THREE.DirectionalLight(0xffffff, 1)
 light.position.set(5,5,5)
-light.castShadow = true
 scene.add(light)
 
 const cube = new THREE.Mesh(
@@ -60,12 +58,10 @@ const cube = new THREE.Mesh(
   ]
 )
 
-cube.castShadow = true
-cube.rotation.x = 0.5
-cube.rotation.y = 0.5
+cube.rotation.set(0.5,0.5,0)
 scene.add(cube)
 
-/* ============== TARGET VALUES ============== */
+/* ============== SMOOTH TARGET VALUES ============== */
 
 let targetRotX = cube.rotation.x
 let targetRotY = cube.rotation.y
@@ -74,9 +70,9 @@ let targetZoom = camera.position.z
 function animate(){
   requestAnimationFrame(animate)
 
-  cube.rotation.x += (targetRotX - cube.rotation.x) * 0.2
-  cube.rotation.y += (targetRotY - cube.rotation.y) * 0.2
-  camera.position.z += (targetZoom - camera.position.z) * 0.2
+  cube.rotation.x += (targetRotX - cube.rotation.x) * 0.15
+  cube.rotation.y += (targetRotY - cube.rotation.y) * 0.15
+  camera.position.z += (targetZoom - camera.position.z) * 0.15
 
   renderer.render(scene, camera)
 }
@@ -94,33 +90,40 @@ const hands = new Hands({
 hands.setOptions({
   maxNumHands:1,
   modelComplexity:1,
-  minDetectionConfidence:0.7,
-  minTrackingConfidence:0.7
+  minDetectionConfidence:0.75,
+  minTrackingConfidence:0.75
 })
 
-let gestureStart = null
+/* ================= STATE CONTROL ================= */
+
+let gestureStartTime = 0
+let lastExecutedTime = 0
 let currentGesture = null
-let locked = false
+
+const HOLD_TIME = 500       // ต้องค้าง 0.5 วิ
+const COOLDOWN_TIME = 700   // กัน spam
+
+/* ================= HELPER FUNCTIONS ================= */
 
 function isRightHand(res){
-  return res.multiHandedness[0].label === "Right"
+  return res.multiHandedness?.[0]?.label === "Right"
+}
+
+function mirrorLandmarks(lm){
+  return lm.map(p => ({ ...p, x: 1 - p.x }))
+}
+
+function distance(a,b){
+  return Math.hypot(a.x-b.x, a.y-b.y)
 }
 
 function isPalmFacingCamera(lm){
   return lm[9].z < lm[0].z
 }
 
-/* 🔥 แก้ปัญหา mirror ตรงนี้ */
-function mirrorLandmarks(lm){
-  return lm.map(p => ({
-    ...p,
-    x: 1 - p.x
-  }))
-}
-
 function getGesture(lm){
 
-  const thumb  = lm[4].x < lm[3].x
+  const thumb  = distance(lm[4], lm[2]) > 0.07
   const index  = lm[8].y < lm[6].y
   const middle = lm[12].y < lm[10].y
   const ring   = lm[16].y < lm[14].y
@@ -147,55 +150,55 @@ function getGesture(lm){
   return null
 }
 
+/* ================= MAIN DETECTION ================= */
+
 hands.onResults(res=>{
 
-  if(!res.multiHandLandmarks?.length){
-    gestureStart = null
-    currentGesture = null
-    locked = false
-    return
-  }
-
+  if(!res.multiHandLandmarks?.length) return
   if(!isRightHand(res)) return
 
-  const lmRaw = res.multiHandLandmarks[0]
-
-  /* 🔥 ใช้ landmark ที่ mirror แล้ว */
-  const lm = mirrorLandmarks(lmRaw)
-
+  const lm = mirrorLandmarks(res.multiHandLandmarks[0])
   if(!isPalmFacingCamera(lm)) return
 
   const detected = getGesture(lm)
+  const now = Date.now()
 
   if(detected !== currentGesture){
-    gestureStart = Date.now()
     currentGesture = detected
-    locked = false
+    gestureStartTime = now
   }
 
-  if(detected && !locked){
-    if(Date.now() - gestureStart > 600){
+  if(!detected) return
 
-      if(detected === "LEFT")  targetRotY -= Math.PI/2
-      if(detected === "RIGHT") targetRotY += Math.PI/2
-      if(detected === "UP")    targetRotX -= Math.PI/2
-      if(detected === "DOWN")  targetRotX += Math.PI/2
+  if(now - gestureStartTime > HOLD_TIME &&
+     now - lastExecutedTime > COOLDOWN_TIME){
 
-      if(detected === "ZOOM_IN"){
-        targetZoom -= 1
-        if(targetZoom < 2) targetZoom = 2
-      }
-
-      if(detected === "ZOOM_OUT"){
-        targetZoom += 1
-        if(targetZoom > 12) targetZoom = 12
-      }
-
-      locked = true
-    }
+    executeGesture(detected)
+    lastExecutedTime = now
   }
 
 })
+
+/* ================= ACTION EXECUTION ================= */
+
+function executeGesture(g){
+
+  if(g === "LEFT")  targetRotY -= Math.PI/2
+  if(g === "RIGHT") targetRotY += Math.PI/2
+  if(g === "UP")    targetRotX -= Math.PI/2
+  if(g === "DOWN")  targetRotX += Math.PI/2
+
+  if(g === "ZOOM_IN"){
+    targetZoom = Math.max(2, targetZoom - 1)
+  }
+
+  if(g === "ZOOM_OUT"){
+    targetZoom = Math.min(12, targetZoom + 1)
+  }
+
+}
+
+/* ================= CAMERA STREAM ================= */
 
 const cam = new Camera(video,{
   onFrame: async ()=>{
@@ -205,6 +208,8 @@ const cam = new Camera(video,{
   height:480
 })
 cam.start()
+
+/* ================= RESPONSIVE ================= */
 
 addEventListener("resize",()=>{
   camera.aspect = innerWidth/innerHeight
