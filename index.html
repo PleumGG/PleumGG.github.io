@@ -41,16 +41,12 @@ renderer.setSize(innerWidth, innerHeight)
 renderer.shadowMap.enabled = true
 document.body.appendChild(renderer.domElement)
 
-/* ===== ไฟ ===== */
-
 scene.add(new THREE.AmbientLight(0xffffff, 0.4))
 
 const directionalLight = new THREE.DirectionalLight(0xffffff, 1.2)
 directionalLight.position.set(5,5,5)
 directionalLight.castShadow = true
 scene.add(directionalLight)
-
-/* ===== พื้น ===== */
 
 const plane = new THREE.Mesh(
   new THREE.PlaneGeometry(10,10),
@@ -60,8 +56,6 @@ plane.rotation.x = -Math.PI/2
 plane.position.y = -1
 plane.receiveShadow = true
 scene.add(plane)
-
-/* ===== กล่อง 6 สี ===== */
 
 const materials = [
   new THREE.MeshStandardMaterial({ color: 0xff0000 }),
@@ -82,8 +76,6 @@ cube.position.y = 0
 cube.rotation.x = 0.4
 cube.rotation.y = 0.6
 scene.add(cube)
-
-/* ===== หมุน 2 แกน ===== */
 
 let targetRotationY = cube.rotation.y
 let targetRotationX = cube.rotation.x
@@ -118,16 +110,24 @@ let gestureStartTime = null
 let currentGesture = null
 let gestureLocked = false
 
-function isPalmFacingCamera(lm){
-  return lm[9].z < lm[0].z
-}
-
 function countRaisedFingers(lm){
   let count = 0
+
+  // Thumb
+  if(lm[4].x < lm[3].x) count++
+
+  // Index
   if(lm[8].y < lm[6].y) count++
+
+  // Middle
   if(lm[12].y < lm[10].y) count++
+
+  // Ring
   if(lm[16].y < lm[14].y) count++
+
+  // Pinky
   if(lm[20].y < lm[18].y) count++
+
   return count
 }
 
@@ -140,13 +140,6 @@ hands.onResults(res=>{
   }
 
   const lm = res.multiHandLandmarks[0]
-
-  if(!isPalmFacingCamera(lm)){
-    gestureStartTime = null
-    currentGesture = null
-    gestureLocked = false
-    return
-  }
 
   const fingerCount = countRaisedFingers(lm)
 
