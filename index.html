@@ -6,12 +6,13 @@
 
 <style>
 body { margin:0; overflow:hidden; background:black; }
+
 video{
   position:fixed;
   right:10px;
   bottom:10px;
   width:200px;
-  transform:scaleX(-1);
+  transform:scaleX(-1); /* mirror ภาพ */
   opacity:1;
 }
 </style>
@@ -109,6 +110,14 @@ function isPalmFacingCamera(lm){
   return lm[9].z < lm[0].z
 }
 
+/* 🔥 แก้ปัญหา mirror ตรงนี้ */
+function mirrorLandmarks(lm){
+  return lm.map(p => ({
+    ...p,
+    x: 1 - p.x
+  }))
+}
+
 function getGesture(lm){
 
   const thumb  = lm[4].x < lm[3].x
@@ -149,7 +158,10 @@ hands.onResults(res=>{
 
   if(!isRightHand(res)) return
 
-  const lm = res.multiHandLandmarks[0]
+  const lmRaw = res.multiHandLandmarks[0]
+
+  /* 🔥 ใช้ landmark ที่ mirror แล้ว */
+  const lm = mirrorLandmarks(lmRaw)
 
   if(!isPalmFacingCamera(lm)) return
 
