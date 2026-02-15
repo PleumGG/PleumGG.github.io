@@ -3,17 +3,18 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Surgical Hand Demo (Mobile Fix)</title>
+    <title>Surgical Dual-Hand Control</title>
     <style>
-        body { margin:0; overflow:hidden; background:#050505; font-family: sans-serif; }
+        body { margin:0; overflow:hidden; background:#050505; font-family: 'Courier New', Courier, monospace; }
         #ui {
-            position: fixed; top: 10px; left: 10px; color: #00ffcc; z-index: 10;
-            background: rgba(0,0,0,0.6); padding: 10px; border-radius: 5px; font-size: 14px;
+            position: fixed; top: 20px; left: 20px; color: #00ffcc; z-index: 10;
+            background: rgba(0,20,20,0.8); padding: 15px; border-left: 5px solid #00ffcc;
         }
-        #gesture-display { font-size: 20px; font-weight: bold; color: #fff; display: block; }
+        .hand-label { font-size: 12px; color: #aaa; margin-bottom: 5px; }
+        .command-text { font-size: 24px; font-weight: bold; color: white; }
         video {
-            position: fixed; left: 10px; bottom: 10px; width: 120px; height: 90px;
-            transform: scaleX(-1); border: 1px solid #00ffcc; border-radius: 5px;
+            position: fixed; right: 10px; bottom: 10px; width: 160px; 
+            transform: scaleX(-1); border-radius: 10px; border: 1px solid #333;
         }
     </style>
     <script src="https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.min.js"></script>
@@ -23,27 +24,31 @@
 <body>
 
     <div id="ui">
-        MODE: <span style="color:#00ffcc">MEDICAL DEMO</span>
-        <span id="gesture-display">INITIALIZING...</span>
+        <div class="hand-label">SURGICAL INTERFACE v2.0</div>
+        <div id="gesture-display" class="command-text">WAITING...</div>
+        <div style="font-size: 11px; margin-top: 10px; color: #00ccaa;">
+            LEFT: Thumb=L | Index=R | 2Fingers=UP | 3Fingers=DOWN<br>
+            RIGHT: Thumb=ZOOM IN | Index=ZOOM OUT
+        </div>
     </div>
 
     <video id="video" autoplay muted playsinline></video>
 
     <script>
-        // 1. Scene Setup
+        /* --- THREE.JS SCENE --- */
         const scene = new THREE.Scene();
         const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
         const renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
         document.body.appendChild(renderer.domElement);
 
-        const light = new THREE.DirectionalLight(0xffffff, 1);
+        const light = new THREE.PointLight(0xffffff, 1.5);
         light.position.set(5, 5, 5);
-        scene.add(light, new THREE.AmbientLight(0x404040));
+        scene.add(light, new THREE.AmbientLight(0xffffff, 0.5));
 
         const cube = new THREE.Mesh(
             new THREE.BoxGeometry(2, 2, 2),
-            [0xff0000, 0x00ff00, 0x0000ff, 0xffff00, 0xff00ff, 0x00ffff].map(c => new THREE.MeshStandardMaterial({color: c}))
+            [0xff4444, 0x44ff44, 0x4444ff, 0xffff44, 0xff44ff, 0x44ffff].map(c => new THREE.MeshStandardMaterial({color: c}))
         );
         scene.add(cube);
         camera.position.z = 6;
@@ -58,62 +63,58 @@
         }
         animate();
 
-        // 2. Gesture Logic (Fixed for Mobile)
+        /* --- GESTURE LOGIC --- */
         const display = document.getElementById("gesture-display");
         let lastAction = 0;
 
-        function getGesture(lm) {
-            // เช็คว่านิ้ว "ยืด" หรือ "พับ" โดยเทียบระยะจากข้อมือ (0)
+        function checkFingers(lm) {
             const dist = (pt) => Math.sqrt(Math.pow(lm[pt].x - lm[0].x, 2) + Math.pow(lm[pt].y - lm[0].y, 2));
-            
-            const fingerUp = [
-                dist(8) > dist(6),  // ชี้
-                dist(12) > dist(10), // กลาง
-                dist(16) > dist(14), // นาง
-                dist(20) > dist(18)  // ก้อย
-            ];
-
-            const upCount = fingerUp.filter(Boolean).length;
-
-            // ท่าทางแบบชัดเจน
-            if (upCount === 0) return "ZOOM_OUT"; // กำหมัด
-            if (upCount === 4) return "ZOOM_IN";  // แบมือ (ชี้ กลาง นาง ก้อย)
-            
-            if (fingerUp[0] && upCount === 1) return "LEFT"; // ชี้หนึ่งนิ้ว
-            if (fingerUp[0] && fingerUp[1] && upCount === 2) return "RIGHT"; // สองนิ้ว
-            if (fingerUp[0] && fingerUp[1] && fingerUp[2] && upCount === 3) return "UP"; // สามนิ้ว
-            
-            // ท่าหมุนลง (ใช้ท่าเกี่ยวนิ้วชี้ลง หรือท่าเฉพาะ) 
-            // ในที่นี้ถ้าไม่เข้าเงื่อนไขบนแต่มีการขยับ ให้เป็น DOWN
-            if (upCount === 4 && lm[8].y > lm[5].y) return "DOWN"; 
-
-            return "READY";
+            return {
+                thumb: dist(4) > dist(2) * 1.5, // โป้งยืด
+                index: dist(8) > dist(6),      // ชี้ยืด
+                middle: dist(12) > dist(10),   // กลางยืด
+                ring: dist(16) > dist(14)      // นางยืด
+            };
         }
 
-        // 3. MediaPipe Setup
         const hands = new Hands({locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`});
-        hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.75, minTrackingConfidence: 0.75 });
+        hands.setOptions({ maxNumHands: 2, modelComplexity: 1, minDetectionConfidence: 0.7, minTrackingConfidence: 0.7 });
 
         hands.onResults(res => {
             if (!res.multiHandLandmarks?.length) {
-                display.innerText = "NO HAND";
+                display.innerText = "NO HANDS DETECTED";
                 return;
             }
 
-            const lm = res.multiHandLandmarks[0];
-            const gesture = getGesture(lm);
-            display.innerText = "GESTURE: " + gesture;
+            let cmd = "READY";
 
-            // หน่วงเวลา 800ms เพื่อไม่ให้มันทำงานเร็วไปจนคุมไม่ได้
-            if (Date.now() - lastAction > 800) {
-                if (gesture === "LEFT") tRotY -= Math.PI/2;
-                if (gesture === "RIGHT") tRotY += Math.PI/2;
-                if (gesture === "UP") tRotX -= Math.PI/2;
-                if (gesture === "DOWN") tRotX += Math.PI/2;
-                if (gesture === "ZOOM_IN") tZoom = Math.max(3, tZoom - 1.5);
-                if (gesture === "ZOOM_OUT") tZoom = Math.min(10, tZoom + 1.5);
-                
-                if (gesture !== "READY") lastAction = Date.now();
+            res.multiHandLandmarks.forEach((lm, index) => {
+                const label = res.multiHandedness[index].label; 
+                const f = checkFingers(lm);
+
+                // หมายเหตุ: MediaPipe ในโหมด Mirror "Left" จะเป็นมือซ้ายจริงของเรา
+                if (label === "Left") {
+                    if (f.thumb && !f.index && !f.middle) cmd = "ROTATE LEFT";
+                    else if (!f.thumb && f.index && !f.middle) cmd = "ROTATE RIGHT";
+                    else if (f.index && f.middle && !f.ring) cmd = "ROTATE UP";
+                    else if (f.index && f.middle && f.ring) cmd = "ROTATE DOWN";
+                } 
+                else if (label === "Right") {
+                    if (f.thumb && !f.index) cmd = "ZOOM IN";
+                    else if (!f.thumb && f.index) cmd = "ZOOM OUT";
+                }
+            });
+
+            display.innerText = cmd;
+
+            if (Date.now() - lastAction > 700 && cmd !== "READY") {
+                if (cmd === "ROTATE LEFT") tRotY -= Math.PI/2;
+                if (cmd === "ROTATE RIGHT") tRotY += Math.PI/2;
+                if (cmd === "ROTATE UP") tRotX -= Math.PI/2;
+                if (cmd === "ROTATE DOWN") tRotX += Math.PI/2;
+                if (cmd === "ZOOM IN") tZoom = Math.max(2, tZoom - 1.5);
+                if (cmd === "ZOOM OUT") tZoom = Math.min(12, tZoom + 1.5);
+                lastAction = Date.now();
             }
         });
 
