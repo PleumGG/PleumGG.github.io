@@ -2,10 +2,26 @@
 <html>
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Gesture Locked Right Hand Only</title>
 
 <style>
-body { margin:0; overflow:hidden; background:black; }
+html, body {
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  width: 100%;
+  height: 100%;
+  background: black;
+}
+
+canvas {
+  display: block;
+  position: fixed;
+  top: 0;
+  left: 0;
+}
+
 video{
   position:fixed;
   right:10px;
@@ -31,12 +47,12 @@ video{
 const scene = new THREE.Scene()
 scene.background = new THREE.Color(0x111111)
 
-const camera = new THREE.PerspectiveCamera(70, innerWidth/innerHeight, 0.1, 1000)
+const camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.1, 1000)
 camera.position.set(0,0,6)
 camera.lookAt(0,0,0)
 
 const renderer = new THREE.WebGLRenderer({ antialias:true })
-renderer.setSize(innerWidth, innerHeight)
+renderer.setSize(window.innerWidth, window.innerHeight)
 renderer.shadowMap.enabled = true
 document.body.appendChild(renderer.domElement)
 
@@ -117,21 +133,27 @@ function getGesture(lm){
   const ring   = lm[16].y < lm[14].y
   const pinky  = lm[20].y < lm[18].y
 
+  // กำมือ (ZOOM_OUT)
   if(!thumb && !index && !middle && !ring && !pinky)
     return "ZOOM_OUT"
 
+  // 1 นิ้ว (หมุนซ้าย)
   if(!thumb && index && !middle && !ring && !pinky)
     return "LEFT"
 
+  // 2 นิ้ว (หมุนขวา)
   if(!thumb && index && middle && !ring && !pinky)
     return "RIGHT"
 
+  // 3 นิ้ว (หมุนขึ้น)
   if(!thumb && index && middle && ring && !pinky)
     return "UP"
 
+  // 4 นิ้ว (หมุนลง)
   if(!thumb && index && middle && ring && pinky)
     return "DOWN"
 
+  // แบมือ 5 นิ้ว (ZOOM_IN)
   if(thumb && index && middle && ring && pinky)
     return "ZOOM_IN"
 
@@ -195,9 +217,9 @@ const cam = new Camera(video,{
 cam.start()
 
 addEventListener("resize",()=>{
-  camera.aspect = innerWidth/innerHeight
+  camera.aspect = window.innerWidth/window.innerHeight
   camera.updateProjectionMatrix()
-  renderer.setSize(innerWidth, innerHeight)
+  renderer.setSize(window.innerWidth, window.innerHeight)
 })
 
 </script>
