@@ -3,11 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Surgical Control v3.2 - Persistent Camera</title>
+    <title>Surgical Control v3.3 - Camera Locked</title>
     <style>
         body { margin:0; overflow:hidden; background:#000; font-family: 'Courier New', monospace; }
         
-        /* UI Panel */
         #ui {
             position: fixed; top: 20px; left: 20px; color: #00ffcc; z-index: 100;
             background: rgba(0,25,25,0.9); padding: 20px; border-left: 5px solid #00ffcc;
@@ -23,20 +22,29 @@
             box-shadow: 0 0 15px #00ffcc; transition: width 0.05s linear;
         }
 
-        /* กล้อง - บังคับให้แสดงผลตลอดเวลา (Persistent) */
-        video {
+        /* Container พิเศษเพื่อล็อคตำแหน่งกล้อง */
+        #cam-container {
             position: fixed; 
             right: 20px; 
             bottom: 20px; 
-            width: 200px; /* ปรับขนาดให้ใหญ่ขึ้นนิดนึงจะได้เห็นมือชัดๆ */
-            height: auto;
-            transform: scaleX(-1); 
-            border-radius: 12px; 
-            border: 2px solid #00ffcc; 
-            background: #222;
-            z-index: 1000; /* ดันให้อยู่บนสุดเหนือทุกอย่าง */
-            box-shadow: 0 0 20px rgba(0, 255, 204, 0.3);
-            display: block !important; /* ห้ามโดนซ่อน */
+            width: 240px; 
+            height: 180px;
+            z-index: 9999; /* สูงที่สุดในหน้าจอ */
+            border: 2px solid #00ffcc;
+            border-radius: 12px;
+            overflow: hidden;
+            background: #111;
+            box-shadow: 0 0 20px rgba(0, 255, 204, 0.4);
+        }
+
+        video {
+            width: 100% !important;
+            height: 100% !important;
+            object-fit: cover;
+            transform: scaleX(-1); /* Mirror */
+            display: block !important; /* ป้องกันการโดนสั่ง Hide */
+            opacity: 1 !important;
+            visibility: visible !important;
         }
     </style>
     <script src="https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.min.js"></script>
@@ -46,16 +54,18 @@
 <body>
 
     <div id="ui">
-        <div style="font-size:12px; color:#00ccaa;">SURGICAL SYSTEM v3.2</div>
+        <div style="font-size:12px; color:#00ccaa;">SURGICAL SYSTEM v3.3</div>
         <div id="gesture-display" class="command-text">READY</div>
         <div id="progress-container"><div id="progress-bar"></div></div>
-        <div id="status-msg" style="font-size:12px; color:#aaa;">CAMERA ALWAYS ON</div>
+        <div id="status-msg" style="font-size:12px; color:#aaa;">CAMERA PERMANENTLY ON</div>
     </div>
 
-    <video id="video" autoplay muted playsinline></video>
+    <div id="cam-container">
+        <video id="video" autoplay muted playsinline></video>
+    </div>
 
     <script>
-        /* --- 1. THREE.JS SETUP --- */
+        /* --- 1. THREE.JS --- */
         const scene = new THREE.Scene();
         const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
         const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -71,8 +81,8 @@
         const light = new THREE.PointLight(0xffffff, 1.2);
         light.position.set(10, 10, 10);
         scene.add(light);
-
         camera.position.z = 8;
+
         let targetZoom = 8;
         let targetQuaternion = new THREE.Quaternion();
 
@@ -84,7 +94,11 @@
         }
         animate();
 
-        /* --- 2. FINGER CHECK (STABLE) --- */
+        /* --- 2. LOGIC --- */
+        const display = document.getElementById("gesture-display");
+        const progBar = document.getElementById("progress-bar");
+        const vEle = document.getElementById("video");
+
         function checkFingers(lm) {
             const d = (pt) => Math.sqrt(Math.pow(lm[pt].x - lm[0].x, 2) + Math.pow(lm[pt].y - lm[0].y, 2));
             return {
@@ -95,11 +109,6 @@
             };
         }
 
-        /* --- 3. GESTURE LOGIC --- */
-        const display = document.getElementById("gesture-display");
-        const progBar = document.getElementById("progress-bar");
-        const statusMsg = document.getElementById("status-msg");
-
         let activeGesture = "READY";
         let startTime = null;
         let isLocked = false;
@@ -109,6 +118,9 @@
         hands.setOptions({ maxNumHands: 2, modelComplexity: 1, minDetectionConfidence: 0.7, minTrackingConfidence: 0.7 });
 
         hands.onResults(res => {
+            // ป้องกัน MediaPipe มาแอบปิดกล้อง
+            if (vEle.style.display === 'none') vEle.style.display = 'block';
+
             let detected = "READY";
             if (res.multiHandLandmarks?.length > 0) {
                 for(let i=0; i < res.multiHandLandmarks.length; i++) {
@@ -172,13 +184,12 @@
             setTimeout(() => renderer.domElement.style.filter = "brightness(1)", 150);
         }
 
-        const cam = new Camera(document.getElementById("video"), {
-            onFrame: async () => { await hands.send({image: document.getElementById("video")}); },
+        const cam = new Camera(vEle, {
+            onFrame: async () => { await hands.send({image: vEle}); },
             width: 480, height: 360
         });
         cam.start();
 
-        // Handle Resize
         window.addEventListener('resize', () => {
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
