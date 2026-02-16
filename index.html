@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Surgical Control v2.4 - World Axis Fixed</title>
+    <title>Surgical Control v2.5 - Matrix Fix</title>
     <style>
         body { margin:0; overflow:hidden; background:#000; font-family: 'Courier New', monospace; }
         #ui {
@@ -32,10 +32,10 @@
 <body>
 
     <div id="ui">
-        <div style="font-size:12px; color:#00ccaa; letter-spacing: 2px;">SURGICAL NAVI v2.4</div>
+        <div style="font-size:12px; color:#00ccaa;">SURGICAL SYSTEM v2.5</div>
         <div id="gesture-display" class="command-text">READY</div>
         <div id="progress-container"><div id="progress-bar"></div></div>
-        <div id="status-msg" style="font-size:12px; color:#aaa;">WAITING FOR HANDS</div>
+        <div id="status-msg" style="font-size:12px; color:#aaa;">WAITING FOR GESTURE</div>
     </div>
 
     <video id="video" autoplay muted playsinline></video>
@@ -53,25 +53,27 @@
             [0xff4444, 0x44ff44, 0x4444ff, 0xffff44, 0xff44ff, 0x44ffff].map(c => new THREE.MeshStandardMaterial({color: c, roughness: 0.2}))
         );
         scene.add(cube);
-        
-        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
-        scene.add(ambientLight);
-        const pointLight = new THREE.PointLight(0xffffff, 1.2);
-        pointLight.position.set(10, 10, 10);
-        scene.add(pointLight);
+        scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+        const light = new THREE.PointLight(0xffffff, 1.2);
+        light.position.set(10, 10, 10);
+        scene.add(light);
 
         camera.position.z = 8;
-        let tZoom = 8;
+        let targetZoom = 8;
+
+        // ตัวแปรเก็บการหมุนเป้าหมาย (Quaternion)
+        let targetQuaternion = new THREE.Quaternion();
 
         function animate() {
             requestAnimationFrame(animate);
-            // Smoothly move camera for zoom only
-            camera.position.z += (tZoom - camera.position.z) * 0.1;
+            // Slerp (Spherical Linear Interpolation) เพื่อให้หมุนนุ่มนวลแต่ไม่เพี้ยนแกน
+            cube.quaternion.slerp(targetQuaternion, 0.1);
+            camera.position.z += (targetZoom - camera.position.z) * 0.1;
             renderer.render(scene, camera);
         }
         animate();
 
-        /* --- 2. LOGIC VARIABLES --- */
+        /* --- 2. LOGIC --- */
         const display = document.getElementById("gesture-display");
         const progBar = document.getElementById("progress-bar");
         const statusMsg = document.getElementById("status-msg");
@@ -82,24 +84,20 @@
         const HOLD_DURATION = 1000;
 
         function checkFingers(lm) {
-            const isExtended = (tip, pip) => lm[tip].y < lm[pip].y; 
-            const isThumbExtended = (tip, base) => Math.abs(lm[tip].x - lm[base].x) > 0.12;
-
+            const isExtended = (tip, pip) => lm[tip].y < lm[pip].y;
             return {
-                thumb: isThumbExtended(4, 2),
+                thumb: Math.abs(lm[4].x - lm[2].x) > 0.12,
                 index: isExtended(8, 6),
                 middle: isExtended(12, 10),
                 ring: isExtended(16, 14)
             };
         }
 
-        /* --- 3. MEDIAPIPE HANDS --- */
         const hands = new Hands({locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`});
         hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.7, minTrackingConfidence: 0.7 });
 
         hands.onResults(res => {
             let detected = "READY";
-
             if (res.multiHandLandmarks?.length > 0) {
                 const lm = res.multiHandLandmarks[0];
                 const label = res.multiHandedness[0].label;
@@ -116,32 +114,26 @@
                 }
             }
 
-            // Logic Holding to Execute
             if (detected !== "READY") {
                 if (detected === activeGesture) {
                     if (!isLocked) {
-                        const now = Date.now();
-                        const elapsed = now - startTime;
+                        const elapsed = Date.now() - startTime;
                         const progress = Math.min((elapsed / HOLD_DURATION) * 100, 100);
-
                         progBar.style.width = progress + "%";
                         display.innerText = detected;
-                        statusMsg.innerText = `CONFIRMING... ${Math.round(progress)}%`;
-
+                        statusMsg.innerText = `HOLDING... ${Math.round(progress)}%`;
                         if (elapsed >= HOLD_DURATION) {
                             runCommand(detected);
                             isLocked = true;
                         }
                     } else {
                         progBar.style.width = "100%";
-                        display.innerHTML = `<span style="color:#00ffcc;">EXECUTION DONE</span>`;
-                        statusMsg.innerText = "RELEASE HAND TO RESET";
+                        display.innerHTML = `<span style="color:#00ffcc;">✓ EXECUTED</span>`;
                     }
                 } else {
                     activeGesture = detected;
                     startTime = Date.now();
                     isLocked = false;
-                    progBar.style.width = "0%";
                 }
             } else {
                 activeGesture = "READY";
@@ -149,28 +141,29 @@
                 isLocked = false;
                 progBar.style.width = "0%";
                 display.innerText = "READY";
-                statusMsg.innerText = "WAITING FOR INPUT";
+                statusMsg.innerText = "WAITING FOR GESTURE";
             }
         });
 
-        /* --- 4. COMMAND EXECUTION (WORLD AXIS FIXED) --- */
+        /* --- 3. COMMAND EXECUTION (QUATERNION FIX) --- */
         function runCommand(cmd) {
-            const step = Math.PI / 2;
-            const xAxis = new THREE.Vector3(1, 0, 0); // แกน X ของโลก
-            const yAxis = new THREE.Vector3(0, 1, 0); // แกน Y ของโลก
-
-            // หมุนอิงตามแกนของโลก (World Space) จะไม่หลงทิศ
-            if (cmd === "ROTATE LEFT") cube.rotateOnWorldAxis(yAxis, -step);
-            if (cmd === "ROTATE RIGHT") cube.rotateOnWorldAxis(yAxis, step);
-            if (cmd === "ROTATE UP") cube.rotateOnWorldAxis(xAxis, -step);
-            if (cmd === "ROTATE DOWN") cube.rotateOnWorldAxis(xAxis, step);
+            const angle = Math.PI / 2;
+            const q = new THREE.Quaternion();
             
-            if (cmd === "ZOOM IN") tZoom = Math.max(2, tZoom - 2);
-            if (cmd === "ZOOM OUT") tZoom = Math.min(12, tZoom + 2);
+            // ใช้แกนโลก (World Space) ในการคำนวณ Quaternion ใหม่ทุกครั้ง
+            if (cmd === "ROTATE LEFT") q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), -angle);
+            if (cmd === "ROTATE RIGHT") q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), angle);
+            if (cmd === "ROTATE UP") q.setFromAxisAngle(new THREE.Vector3(1, 0, 0), -angle);
+            if (cmd === "ROTATE DOWN") q.setFromAxisAngle(new THREE.Vector3(1, 0, 0), angle);
 
-            // Flash effect feedback
+            // เอา Quaternion ใหม่ คูณกับท่าปัจจุบันของเป้าหมาย
+            targetQuaternion.multiplyQuaternions(q, targetQuaternion);
+            
+            if (cmd === "ZOOM IN") targetZoom = Math.max(2, targetZoom - 2);
+            if (cmd === "ZOOM OUT") targetZoom = Math.min(12, targetZoom + 2);
+
             renderer.domElement.style.filter = "brightness(2)";
-            setTimeout(() => renderer.domElement.style.filter = "brightness(1)", 200);
+            setTimeout(() => renderer.domElement.style.filter = "brightness(1)", 150);
         }
 
         const cam = new Camera(document.getElementById("video"), {
@@ -178,12 +171,6 @@
             width: 480, height: 360
         });
         cam.start();
-
-        window.addEventListener('resize', () => {
-            camera.aspect = window.innerWidth / window.innerHeight;
-            camera.updateProjectionMatrix();
-            renderer.setSize(window.innerWidth, window.innerHeight);
-        });
     </script>
 </body>
 </html>
