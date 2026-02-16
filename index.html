@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Surgical Control v2.9 - Pinky Replace Thumb</title>
+    <title>Surgical Control v3.0 - Palm Facing Fix</title>
     <style>
         body { margin:0; overflow:hidden; background:#000; font-family: 'Courier New', monospace; }
         #ui {
@@ -32,10 +32,10 @@
 <body>
 
     <div id="ui">
-        <div style="font-size:12px; color:#00ccaa;">SURGICAL SYSTEM v2.9</div>
+        <div style="font-size:12px; color:#00ccaa;">SURGICAL SYSTEM v3.0</div>
         <div id="gesture-display" class="command-text">READY</div>
         <div id="progress-container"><div id="progress-bar"></div></div>
-        <div id="status-msg" style="font-size:12px; color:#aaa;">PINKY CONTROL ACTIVE</div>
+        <div id="status-msg" style="font-size:12px; color:#aaa;">PALM-IN MODE ACTIVE</div>
     </div>
 
     <video id="video" autoplay muted playsinline></video>
@@ -70,14 +70,19 @@
         }
         animate();
 
-        /* --- 2. FINGER CHECK (NO THUMB USED) --- */
+        /* --- 2. FINGER CHECK (PALM-IN OPTIMIZED) --- */
         function checkFingers(lm) {
-            const isExtended = (tip, pip) => lm[tip].y < lm[pip].y;
+            // ใช้ระยะห่างจากข้อมือ (จุด 0) แทนพิกัด Y เพื่อรองรับการหันหน้ามือเข้าหาตัว
+            const getDist = (pt) => Math.sqrt(Math.pow(lm[pt].x - lm[0].x, 2) + Math.pow(lm[pt].y - lm[0].y, 2));
+            
+            // ระยะห่างของข้อนิ้ว (ใช้เป็นเกณฑ์ตัดสินว่านิ้วยืดหรือพับ)
+            const isExt = (tip, base) => getDist(tip) > getDist(base) * 1.2;
+
             return {
-                index: isExtended(8, 6),
-                middle: isExtended(12, 10),
-                ring: isExtended(16, 14),
-                pinky: isExtended(20, 18)
+                index: isExt(8, 6),
+                middle: isExt(12, 10),
+                ring: isExt(16, 14),
+                pinky: isExt(20, 18)
             };
         }
 
@@ -92,7 +97,7 @@
         const HOLD_DURATION = 1000;
 
         const hands = new Hands({locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`});
-        hands.setOptions({ maxNumHands: 2, modelComplexity: 1, minDetectionConfidence: 0.8, minTrackingConfidence: 0.8 });
+        hands.setOptions({ maxNumHands: 2, modelComplexity: 1, minDetectionConfidence: 0.7, minTrackingConfidence: 0.7 });
 
         hands.onResults(res => {
             let detected = "READY";
@@ -103,19 +108,15 @@
                     const label = res.multiHandedness[i].label;
                     const f = checkFingers(lm);
 
+                    // เมื่อหันหน้ามือเข้าหาตัว บางที MediaPipe จะสลับ Left/Right 
+                    // โค้ดนี้จะยึดตามที่ AI ตรวจจับได้ ณ ขณะนั้น
                     if (label === "Left") {
-                        // ROTATE LEFT: นิ้วก้อยอย่างเดียว (นิ้วอื่นพับ)
                         if (f.pinky && !f.index && !f.middle && !f.ring) detected = "ROTATE LEFT";
-                        // ROTATE RIGHT: นิ้วชี้อย่างเดียว
                         else if (!f.pinky && f.index && !f.middle && !f.ring) detected = "ROTATE RIGHT";
-                        // ROTATE UP: นิ้วชี้ + กลาง
                         else if (!f.pinky && f.index && f.middle && !f.ring) detected = "ROTATE UP";
-                        // ROTATE DOWN: นิ้วชี้ + กลาง + นาง
                         else if (!f.pinky && f.index && f.middle && f.ring) detected = "ROTATE DOWN";
-                    } else if (label === "Right") {
-                        // ZOOM IN: นิ้วก้อยอย่างเดียว
+                    } else {
                         if (f.pinky && !f.index && !f.middle && !f.ring) detected = "ZOOM IN";
-                        // ZOOM OUT: นิ้วชี้อย่างเดียว
                         else if (!f.pinky && f.index && !f.middle && !f.ring) detected = "ZOOM OUT";
                     }
                 }
@@ -133,14 +134,12 @@
                             runCommand(detected);
                             isLocked = true;
                         }
-                    } else {
-                        progBar.style.width = "100%";
-                        display.innerHTML = `<span style="color:#00ffcc;">✓ EXECUTED</span>`;
                     }
                 } else {
                     activeGesture = detected;
                     startTime = Date.now();
                     isLocked = false;
+                    progBar.style.width = "0%";
                 }
             } else {
                 activeGesture = "READY";
@@ -148,7 +147,6 @@
                 isLocked = false;
                 progBar.style.width = "0%";
                 display.innerText = "READY";
-                statusMsg.innerText = "STANDBY";
             }
         });
 
