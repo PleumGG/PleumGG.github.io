@@ -2,26 +2,27 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Surgical Control v3.6 - Clean Interface</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Surgical Control v3.1 - Fisted Pinky Fix</title>
     <style>
-        body { margin:0; overflow:hidden; background:#000; font-family: 'Courier New', monospace; touch-action: none; }
-        
-        /* UI Panel - คลีนขึ้น */
+        body { margin:0; overflow:hidden; background:#000; font-family: 'Courier New', monospace; }
         #ui {
-            position: fixed; top: 20px; left: 20px; color: #00ffcc; z-index: 100;
-            background: rgba(0,20,20,0.8); padding: 20px; border-left: 5px solid #00ffcc;
-            min-width: 250px; pointer-events: none;
-            box-shadow: 0 0 20px rgba(0, 255, 204, 0.2);
+            position: fixed; top: 20px; left: 20px; color: #00ffcc; z-index: 10;
+            background: rgba(0,25,25,0.9); padding: 20px; border-left: 5px solid #00ffcc;
+            min-width: 280px; pointer-events: none;
         }
-        .command-text { font-size: 24px; font-weight: bold; color: white; margin-bottom: 5px; }
-        #progress-container { width: 100%; height: 12px; background: #111; margin: 10px 0; border: 1px solid #333; }
-        #progress-bar { width: 0%; height: 100%; background: #00ffcc; transition: width 0.05s linear; box-shadow: 0 0 10px #00ffcc; }
-        #status-msg { font-size: 12px; color: #00ccaa; letter-spacing: 1px; }
-
-        /* ซ่อน Video ไว้เบื้องหลัง (ห้ามลบทิ้งเพราะต้องใช้ประมวลผล) */
+        .command-text { font-size: 26px; font-weight: bold; color: white; margin-bottom: 5px; }
+        #progress-container {
+            width: 100%; height: 15px; background: #111;
+            border: 1px solid #333; margin: 10px 0; position: relative;
+        }
+        #progress-bar {
+            width: 0%; height: 100%; background: #00ffcc;
+            box-shadow: 0 0 15px #00ffcc; transition: width 0.05s linear;
+        }
         video {
-            position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none;
+            position: fixed; right: 10px; bottom: 10px; width: 160px; 
+            transform: scaleX(-1); border-radius: 8px; border: 1px solid #333;
         }
     </style>
     <script src="https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.min.js"></script>
@@ -31,16 +32,15 @@
 <body>
 
     <div id="ui">
-        <div id="status-msg">SYSTEM ACTIVE</div>
+        <div style="font-size:12px; color:#00ccaa;">SURGICAL SYSTEM v3.1</div>
         <div id="gesture-display" class="command-text">READY</div>
         <div id="progress-container"><div id="progress-bar"></div></div>
+        <div id="status-msg" style="font-size:12px; color:#aaa;">FISTED PINKY DETECTOR</div>
     </div>
 
     <video id="video" autoplay muted playsinline></video>
 
     <script>
-        const videoElement = document.getElementById('video');
-
         /* --- 1. THREE.JS SETUP --- */
         const scene = new THREE.Scene();
         const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
@@ -50,15 +50,15 @@
 
         const cube = new THREE.Mesh(
             new THREE.BoxGeometry(2.5, 2.5, 2.5),
-            [0xff4444, 0x44ff44, 0x4444ff, 0xffff44, 0xff44ff, 0x44ffff].map(c => new THREE.MeshStandardMaterial({color: c, roughness: 0.3}))
+            [0xff4444, 0x44ff44, 0x4444ff, 0xffff44, 0xff44ff, 0x44ffff].map(c => new THREE.MeshStandardMaterial({color: c, roughness: 0.2}))
         );
         scene.add(cube);
         scene.add(new THREE.AmbientLight(0xffffff, 0.6));
         const light = new THREE.PointLight(0xffffff, 1.2);
         light.position.set(10, 10, 10);
         scene.add(light);
-        camera.position.z = 8;
 
+        camera.position.z = 8;
         let targetZoom = 8;
         let targetQuaternion = new THREE.Quaternion();
 
@@ -70,31 +70,49 @@
         }
         animate();
 
-        /* --- 2. GESTURE DETECTION (PINKY & INDEX BASED) --- */
+        /* --- 2. FINGER CHECK (FIST-PINKY OPTIMIZED) --- */
         function checkFingers(lm) {
+            // หาระยะจากข้อมือ (0) ไปยังปลายนิ้วต่างๆ
             const d = (pt) => Math.sqrt(Math.pow(lm[pt].x - lm[0].x, 2) + Math.pow(lm[pt].y - lm[0].y, 2));
+            
+            // นิ้วจะถือว่า "ยืด" เมื่อปลายนิ้วอยู่ห่างจากข้อมือมากกว่าข้อต่อกลางนิ้ว (PIP)
+            // และสำหรับท่ากำมือ: นิ้วก้อยต้องยาวกว่านิ้วนาง (16) อย่างชัดเจน
+            const pinkyIsExtended = d(20) > d(18) * 1.1;
+            const indexIsExtended = d(8) > d(6) * 1.1;
+            const middleIsExtended = d(12) > d(10) * 1.1;
+            const ringIsExtended = d(16) > d(14) * 1.1;
+
             return {
-                index: d(8) > d(6) * 1.15,
-                middle: d(12) > d(10) * 1.15,
-                ring: d(16) > d(14) * 1.15,
-                pinky: d(20) > d(18) * 1.15
+                index: indexIsExtended,
+                middle: middleIsExtended,
+                ring: ringIsExtended,
+                pinky: pinkyIsExtended
             };
         }
 
-        const hands = new Hands({locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`});
-        hands.setOptions({ maxNumHands: 2, modelComplexity: 1, minDetectionConfidence: 0.7, minTrackingConfidence: 0.7 });
+        /* --- 3. GESTURE LOGIC --- */
+        const display = document.getElementById("gesture-display");
+        const progBar = document.getElementById("progress-bar");
+        const statusMsg = document.getElementById("status-msg");
 
         let activeGesture = "READY";
         let startTime = null;
         let isLocked = false;
+        const HOLD_DURATION = 1000;
+
+        const hands = new Hands({locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`});
+        hands.setOptions({ maxNumHands: 2, modelComplexity: 1, minDetectionConfidence: 0.7, minTrackingConfidence: 0.7 });
 
         hands.onResults(res => {
             let detected = "READY";
+
             if (res.multiHandLandmarks?.length > 0) {
                 for(let i=0; i < res.multiHandLandmarks.length; i++) {
                     const lm = res.multiHandLandmarks[i];
                     const label = res.multiHandedness[i].label;
                     const f = checkFingers(lm);
+
+                    // กรองให้แม่นขึ้น: ถ้าชูนิ้วก้อย (Pinky) นิ้วกลางและนางต้องพับ (Fisted)
                     const isFisted = !f.middle && !f.ring;
 
                     if (label === "Left") {
@@ -109,27 +127,35 @@
                 }
             }
 
+            // Logic เดิมที่ทำงานได้ดีอยู่แล้ว
             if (detected !== "READY") {
                 if (detected === activeGesture) {
                     if (!isLocked) {
                         const elapsed = Date.now() - startTime;
-                        const progress = Math.min((elapsed / 1000) * 100, 100);
-                        document.getElementById("progress-bar").style.width = progress + "%";
-                        document.getElementById("gesture-display").innerText = detected;
-                        if (elapsed >= 1000) { runCommand(detected); isLocked = true; }
+                        const progress = Math.min((elapsed / HOLD_DURATION) * 100, 100);
+                        progBar.style.width = progress + "%";
+                        display.innerText = detected;
+                        statusMsg.innerText = `HOLDING... ${Math.round(progress)}%`;
+                        if (elapsed >= HOLD_DURATION) {
+                            runCommand(detected);
+                            isLocked = true;
+                        }
+                    } else {
+                        progBar.style.width = "100%";
+                        display.innerHTML = `<span style="color:#00ffcc;">✓ DONE</span>`;
                     }
                 } else {
                     activeGesture = detected;
                     startTime = Date.now();
                     isLocked = false;
-                    document.getElementById("progress-bar").style.width = "0%";
+                    progBar.style.width = "0%";
                 }
             } else {
                 activeGesture = "READY";
                 startTime = null;
                 isLocked = false;
-                document.getElementById("progress-bar").style.width = "0%";
-                document.getElementById("gesture-display").innerText = "READY";
+                progBar.style.width = "0%";
+                display.innerText = "READY";
             }
         });
 
@@ -145,22 +171,15 @@
             if (cmd === "ZOOM IN") targetZoom = Math.max(2, targetZoom - 2);
             if (cmd === "ZOOM OUT") targetZoom = Math.min(12, targetZoom + 2);
 
-            // Flash effect เมื่อสั่งสำเร็จ
             renderer.domElement.style.filter = "brightness(2)";
             setTimeout(() => renderer.domElement.style.filter = "brightness(1)", 150);
         }
 
-        const cam = new Camera(videoElement, {
-            onFrame: async () => { await hands.send({image: videoElement}); },
+        const cam = new Camera(document.getElementById("video"), {
+            onFrame: async () => { await hands.send({image: document.getElementById("video")}); },
             width: 480, height: 360
         });
         cam.start();
-
-        window.addEventListener('resize', () => {
-            camera.aspect = window.innerWidth / window.innerHeight;
-            camera.updateProjectionMatrix();
-            renderer.setSize(window.innerWidth, window.innerHeight);
-        });
     </script>
 </body>
 </html>
