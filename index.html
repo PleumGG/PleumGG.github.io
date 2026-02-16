@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Surgical Control v4.0 - Permanent Camera</title>
+    <title>Surgical Control v4.1 - Fix Aspect Ratio</title>
     <style>
         body { margin:0; overflow:hidden; background:#000; font-family: 'Courier New', monospace; touch-action: none; }
         
@@ -16,16 +16,16 @@
         #progress-container { width: 100%; height: 10px; background: #111; border: 1px solid #333; margin: 8px 0; }
         #progress-bar { width: 0%; height: 100%; background: #00ffcc; box-shadow: 0 0 10px #00ffcc; transition: width 0.05s linear; }
 
-        /* กรอบกล้องที่จะแสดงผลตลอดเวลา */
+        /* กรอบกล้อง - ปรับขนาดให้เป็นสัดส่วนมาตรฐานมือถือ */
         #camera-monitor {
             position: fixed; 
             right: 15px; 
             bottom: 15px; 
-            width: 180px; 
-            height: 135px;
-            z-index: 9999; /* สูงที่สุด */
+            width: 150px; 
+            height: 150px; /* ทำเป็นสี่เหลี่ยมจัตุรัสให้ดูเท่แบบสโคปหมอ */
+            z-index: 9999; 
             border: 2px solid #00ffcc;
-            border-radius: 10px;
+            border-radius: 50%; /* เปลี่ยนเป็นวงกลมดูเป็น Surgical Monitor มากขึ้น */
             background: #000;
             overflow: hidden;
             box-shadow: 0 0 20px rgba(0, 255, 204, 0.4);
@@ -34,30 +34,29 @@
         #camera-canvas {
             width: 100%;
             height: 100%;
-            object-fit: cover;
-            transform: scaleX(-1); /* Mirror ภาพให้ดูง่าย */
+            transform: scaleX(-1); /* Mirror ภาพ */
         }
 
-        /* ซ่อน Video ตัวจริงไว้เบื้องหลัง */
         #video { position: fixed; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
     </style>
-    <script src="https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
 </head>
 <body>
 
     <div id="ui">
-        <div style="font-size:10px; color:#00ccaa; letter-spacing:1px;">MONITORING ACTIVE</div>
+        <div style="font-size:10px; color:#00ccaa;">MONITORING v4.1</div>
         <div id="gesture-display" class="command-text">READY</div>
         <div id="progress-container"><div id="progress-bar"></div></div>
     </div>
 
     <div id="camera-monitor">
-        <canvas id="camera-canvas"></canvas>
+        <canvas id="camera-canvas" width="300" height="300"></canvas>
     </div>
 
     <video id="video" autoplay muted playsinline></video>
+
+    <script src="https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
 
     <script>
         const videoElement = document.getElementById('video');
@@ -77,9 +76,6 @@
         );
         scene.add(cube);
         scene.add(new THREE.AmbientLight(0xffffff, 0.6));
-        const light = new THREE.PointLight(0xffffff, 1.2);
-        light.position.set(10, 10, 10);
-        scene.add(light);
         camera.position.z = 8;
 
         let targetZoom = 8;
@@ -91,17 +87,36 @@
             camera.position.z += (targetZoom - camera.position.z) * 0.1;
             renderer.render(scene, camera);
 
-            // วาดภาพจาก Video ลง Canvas ตลอดเวลา (ทำให้กล้องไม่หาย)
+            // วาดภาพแบบ "Aspect Ratio Fix" (Center Crop)
             if (videoElement.readyState === videoElement.HAVE_ENOUGH_DATA) {
-                canvasCtx.drawImage(videoElement, 0, 0, canvasElement.width, canvasElement.height);
+                const vW = videoElement.videoWidth;
+                const vH = videoElement.videoHeight;
+                const cW = canvasElement.width;
+                const cH = canvasElement.height;
+                
+                // คำนวณสัดส่วนเพื่อให้ภาพไม่แบน
+                const aspect = vW / vH;
+                let drawW, drawH, offsetX, offsetY;
+                
+                if (aspect > 1) { // แนวนอน
+                    drawH = vH;
+                    drawW = vH; // ตัดให้เป็นจัตุรัส
+                    offsetX = (vW - vH) / 2;
+                    offsetY = 0;
+                } else { // แนวตั้ง
+                    drawW = vW;
+                    drawH = vW;
+                    offsetX = 0;
+                    offsetY = (vH - vW) / 2;
+                }
+
+                canvasCtx.drawImage(videoElement, offsetX, offsetY, drawW, drawH, 0, 0, cW, cH);
             }
-            
-            // กันวิดีโอหยุดทำงานเองบนมือถือ
             if (videoElement.paused) videoElement.play();
         }
         animate();
 
-        /* --- 2. GESTURE LOGIC --- */
+        /* --- 2. GESTURE & CAMERA --- */
         function checkFingers(lm) {
             const d = (pt) => Math.sqrt(Math.pow(lm[pt].x - lm[0].x, 2) + Math.pow(lm[pt].y - lm[0].y, 2));
             return {
@@ -138,7 +153,6 @@
                 }
             }
 
-            // UI และการหน่วงเวลา 1 วินาที
             if (detected !== "READY") {
                 if (detected === activeGesture) {
                     if (!isLocked) {
@@ -149,15 +163,11 @@
                         if (elapsed >= 1000) { runCommand(detected); isLocked = true; }
                     }
                 } else {
-                    activeGesture = detected;
-                    startTime = Date.now();
-                    isLocked = false;
+                    activeGesture = detected; startTime = Date.now(); isLocked = false;
                     document.getElementById("progress-bar").style.width = "0%";
                 }
             } else {
-                activeGesture = "READY";
-                startTime = null;
-                isLocked = false;
+                activeGesture = "READY"; startTime = null; isLocked = false;
                 document.getElementById("progress-bar").style.width = "0%";
                 document.getElementById("gesture-display").innerText = "READY";
             }
