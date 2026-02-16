@@ -3,53 +3,44 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Surgical Control v4.2 - Final Aspect Fix</title>
+    <title>Surgical Control v5.0 - Safety Lock</title>
     <style>
         body { margin:0; overflow:hidden; background:#000; font-family: 'Courier New', monospace; touch-action: none; }
         
         #ui {
             position: fixed; top: 15px; left: 15px; color: #00ffcc; z-index: 1000;
-            background: rgba(0,25,25,0.85); padding: 15px; border-left: 5px solid #00ffcc;
-            min-width: 200px; pointer-events: none; border-radius: 0 8px 8px 0;
+            background: rgba(0,20,20,0.9); padding: 20px; border-left: 5px solid #ff4444; /* เริ่มต้นเป็นสีแดง */
+            min-width: 250px; pointer-events: none; border-radius: 0 8px 8px 0;
+            transition: border-color 0.3s;
         }
-        .command-text { font-size: 22px; font-weight: bold; color: white; margin-bottom: 5px; }
-        #progress-container { width: 100%; height: 8px; background: #111; margin: 8px 0; }
-        #progress-bar { width: 0%; height: 100%; background: #00ffcc; box-shadow: 0 0 10px #00ffcc; transition: width 0.05s linear; }
+        #ui.unlocked { border-left-color: #00ffcc; } /* เปลี่ยนเป็นเขียวเมื่อปลดล็อค */
 
-        /* ล็อคกรอบกล้องให้เป็นสัดส่วน 1:1 และห้ามบีบภาพ */
+        .status-label { font-size: 10px; color: #aaa; letter-spacing: 2px; }
+        #lock-status { font-weight: bold; color: #ff4444; }
+        #ui.unlocked #lock-status { color: #00ffcc; }
+
+        .command-text { font-size: 24px; font-weight: bold; color: white; margin-top: 5px; }
+        #progress-container { width: 100%; height: 10px; background: #111; margin: 10px 0; }
+        #progress-bar { width: 0%; height: 100%; background: #ff4444; transition: width 0.05s linear; }
+        #ui.unlocked #progress-bar { background: #00ffcc; }
+
         #camera-monitor {
-            position: fixed; 
-            right: 20px; 
-            bottom: 20px; 
-            width: 140px; 
-            height: 140px;
-            z-index: 9999; 
-            border: 2px solid #00ffcc;
-            border-radius: 20px; /* ขอบมนสวยๆ */
-            background: #000;
-            overflow: hidden; /* สำคัญ: เพื่อ Crop ส่วนที่เกินออก */
-            box-shadow: 0 0 20px rgba(0, 255, 204, 0.4);
-            display: block !important;
-            visibility: visible !important;
+            position: fixed; right: 20px; bottom: 20px; width: 140px; height: 140px;
+            z-index: 9999; border: 2px solid #555; border-radius: 20px;
+            overflow: hidden; background: #000; transition: border-color 0.3s;
         }
+        #ui.unlocked + #camera-monitor { border-color: #00ffcc; }
 
-        /* ใช้ object-fit: cover เพื่อให้ภาพขยายเต็มกรอบโดยไม่เสียสัดส่วน (หน้าไม่แบน) */
-        #video {
-            width: 100% !important;
-            height: 100% !important;
-            object-fit: cover !important;
-            transform: scaleX(-1); /* Mirror */
-            display: block !important;
-            background: #000;
-        }
+        #video { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
     </style>
 </head>
 <body>
 
-    <div id="ui">
-        <div style="font-size:10px; color:#00ccaa;">SURGICAL NAVI v4.2</div>
-        <div id="gesture-display" class="command-text">READY</div>
+    <div id="ui" id="main-ui">
+        <div class="status-label">SYSTEM STATUS: <span id="lock-status">LOCKED</span></div>
+        <div id="gesture-display" class="command-text">FIST TO UNLOCK</div>
         <div id="progress-container"><div id="progress-bar"></div></div>
+        <div style="font-size: 11px; color: #666;" id="hint-text">กำมือขวาค้างไว้เพื่อเข้าสู่โหมดควบคุม</div>
     </div>
 
     <div id="camera-monitor">
@@ -62,6 +53,13 @@
 
     <script>
         const videoElement = document.getElementById('video');
+        const uiElement = document.getElementById('ui');
+        const lockStatusText = document.getElementById('lock-status');
+        const gestureDisplayText = document.getElementById('gesture-display');
+        const progBar = document.getElementById('progress-bar');
+        const hintText = document.getElementById('hint-text');
+
+        let isSystemUnlocked = false; // สถานะความปลอดภัย
 
         /* --- 1. THREE.JS --- */
         const scene = new THREE.Scene();
@@ -75,7 +73,7 @@
             [0xff4444, 0x44ff44, 0x4444ff, 0xffff44, 0xff44ff, 0x44ffff].map(c => new THREE.MeshStandardMaterial({color: c}))
         );
         scene.add(cube);
-        scene.add(new THREE.AmbientLight(0xffffff, 0.7));
+        scene.add(new THREE.AmbientLight(0xffffff, 0.8));
         camera.position.z = 8;
 
         let targetZoom = 8;
@@ -86,21 +84,21 @@
             cube.quaternion.slerp(targetQuaternion, 0.15);
             camera.position.z += (targetZoom - camera.position.z) * 0.1;
             renderer.render(scene, camera);
-
-            // กันวิดีโอหยุดทำงานเอง
             if (videoElement.paused) videoElement.play();
         }
         animate();
 
-        /* --- 2. GESTURE --- */
+        /* --- 2. GESTURE & SAFETY LOGIC --- */
         function checkFingers(lm) {
             const d = (pt) => Math.sqrt(Math.pow(lm[pt].x - lm[0].x, 2) + Math.pow(lm[pt].y - lm[0].y, 2));
-            return {
+            const f = {
                 index: d(8) > d(6) * 1.15,
                 middle: d(12) > d(10) * 1.15,
                 ring: d(16) > d(14) * 1.15,
                 pinky: d(20) > d(18) * 1.15
             };
+            const isFisted = !f.index && !f.middle && !f.ring && !f.pinky; // กำมือจริงคือพับทุกนิ้ว
+            return { ...f, isFisted };
         }
 
         const hands = new Hands({locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`});
@@ -108,47 +106,83 @@
 
         let activeGesture = "READY";
         let startTime = null;
-        let isLocked = false;
+        let isActionExecuted = false;
 
         hands.onResults(res => {
             let detected = "READY";
+            
             if (res.multiHandLandmarks?.length > 0) {
                 const lm = res.multiHandLandmarks[0];
-                const label = res.multiHandedness[0].label;
+                const label = res.multiHandedness[0].label; // Left/Right จากมุมกล้อง
                 const f = checkFingers(lm);
-                const isFisted = !f.middle && !f.ring;
 
-                if (label === "Left") {
-                    if (f.pinky && isFisted && !f.index) detected = "ROTATE LEFT";
-                    else if (f.index && isFisted && !f.pinky) detected = "ROTATE RIGHT";
-                    else if (f.index && f.middle && !f.ring && !f.pinky) detected = "ROTATE UP";
-                    else if (f.index && f.middle && f.ring && !f.pinky) detected = "ROTATE DOWN";
-                } else {
-                    if (f.pinky && isFisted && !f.index) detected = "ZOOM IN";
-                    else if (f.index && isFisted && !f.pinky) detected = "ZOOM OUT";
-                }
-            }
-
-            // บังคับการแสดงผล UI
-            if (detected !== "READY") {
-                if (detected === activeGesture) {
-                    if (!isLocked) {
-                        const elapsed = Date.now() - startTime;
-                        const progress = Math.min((elapsed / 1000) * 100, 100);
-                        document.getElementById("progress-bar").style.width = progress + "%";
-                        document.getElementById("gesture-display").innerText = detected;
-                        if (elapsed >= 1000) { runCommand(detected); isLocked = true; }
+                if (!isSystemUnlocked) {
+                    // โหมด LOCKED: รอท่ากำมือขวา (หันหน้ามือเข้ากล้อง)
+                    if (label === "Right" && f.isFisted) {
+                        detected = "UNLOCKING...";
                     }
                 } else {
-                    activeGesture = detected; startTime = Date.now(); isLocked = false;
-                    document.getElementById("progress-bar").style.width = "0%";
+                    // โหมด UNLOCKED: รับคำสั่งจริง
+                    const isControlFist = !f.middle && !f.ring;
+                    if (label === "Left") {
+                        if (f.pinky && isControlFist && !f.index) detected = "ROTATE LEFT";
+                        else if (f.index && isControlFist && !f.pinky) detected = "ROTATE RIGHT";
+                        else if (f.index && f.middle && !f.ring && !f.pinky) detected = "ROTATE UP";
+                        else if (f.index && f.middle && f.ring && !f.pinky) detected = "ROTATE DOWN";
+                    } else {
+                        if (f.pinky && isControlFist && !f.index) detected = "ZOOM IN";
+                        else if (f.index && isControlFist && !f.pinky) detected = "ZOOM OUT";
+                    }
+                }
+            }
+
+            // Logic การนับเวลาถอยหลัง (1 วินาที)
+            if (detected !== "READY") {
+                if (detected === activeGesture) {
+                    if (!isActionExecuted) {
+                        const elapsed = Date.now() - startTime;
+                        const progress = Math.min((elapsed / 1000) * 100, 100);
+                        progBar.style.width = progress + "%";
+                        gestureDisplayText.innerText = detected;
+
+                        if (elapsed >= 1000) {
+                            if (!isSystemUnlocked && detected === "UNLOCKING...") {
+                                unlockSystem();
+                            } else if (isSystemUnlocked) {
+                                runCommand(detected);
+                                lockSystem(); // ทำเสร็จแล้วล็อคทันทีเพื่อความปลอดภัย
+                            }
+                            isActionExecuted = true;
+                        }
+                    }
+                } else {
+                    activeGesture = detected; startTime = Date.now(); isActionExecuted = false;
+                    progBar.style.width = "0%";
                 }
             } else {
-                activeGesture = "READY"; startTime = null; isLocked = false;
-                document.getElementById("progress-bar").style.width = "0%";
-                document.getElementById("gesture-display").innerText = "READY";
+                activeGesture = "READY"; startTime = null; isActionExecuted = false;
+                progBar.style.width = "0%";
+                gestureDisplayText.innerText = isSystemUnlocked ? "SYSTEM READY" : "FIST TO UNLOCK";
             }
         });
+
+        function unlockSystem() {
+            isSystemUnlocked = true;
+            uiElement.classList.add('unlocked');
+            lockStatusText.innerText = "UNLOCKED";
+            hintText.innerText = "พร้อมรับคำสั่งผ่าตัด (ระบบจะล็อคอัตโนมัติหลังสั่งการ)";
+            // Flash เขียว
+            renderer.domElement.style.boxShadow = "inset 0 0 100px rgba(0,255,204,0.3)";
+            setTimeout(() => renderer.domElement.style.boxShadow = "none", 500);
+        }
+
+        function lockSystem() {
+            isSystemUnlocked = false;
+            uiElement.classList.remove('unlocked');
+            lockStatusText.innerText = "LOCKED";
+            hintText.innerText = "กำมือขวาค้างไว้เพื่อเข้าสู่โหมดควบคุม";
+            progBar.style.width = "0%";
+        }
 
         function runCommand(cmd) {
             const angle = Math.PI / 2;
@@ -160,6 +194,8 @@
             targetQuaternion.multiplyQuaternions(q, targetQuaternion);
             if (cmd === "ZOOM IN") targetZoom = Math.max(2, targetZoom - 2);
             if (cmd === "ZOOM OUT") targetZoom = Math.min(12, targetZoom + 2);
+            
+            // Effect แจ้งเตือนการทำงาน
             renderer.domElement.style.filter = "brightness(2)";
             setTimeout(() => renderer.domElement.style.filter = "brightness(1)", 150);
         }
@@ -169,12 +205,6 @@
             width: 640, height: 480
         });
         cam.start();
-
-        window.addEventListener('resize', () => {
-            camera.aspect = window.innerWidth / window.innerHeight;
-            camera.updateProjectionMatrix();
-            renderer.setSize(window.innerWidth, window.innerHeight);
-        });
     </script>
 </body>
 </html>
