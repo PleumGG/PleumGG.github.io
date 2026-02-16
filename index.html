@@ -3,34 +3,43 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Surgical Control - Master Template (No Preview)</title>
+    <title>Surgical Control v4.0 - Permanent Camera</title>
     <style>
         body { margin:0; overflow:hidden; background:#000; font-family: 'Courier New', monospace; touch-action: none; }
         
-        /* UI Panel - ปรับให้ดู Professional ขึ้น */
         #ui {
-            position: fixed; top: 20px; left: 20px; color: #00ffcc; z-index: 100;
-            background: rgba(0,25,25,0.8); padding: 20px; border-left: 5px solid #00ffcc;
-            min-width: 250px; pointer-events: none;
+            position: fixed; top: 15px; left: 15px; color: #00ffcc; z-index: 1000;
+            background: rgba(0,25,25,0.85); padding: 15px; border-left: 5px solid #00ffcc;
+            min-width: 220px; pointer-events: none; border-radius: 0 8px 8px 0;
         }
-        .command-text { font-size: 26px; font-weight: bold; color: white; margin-bottom: 5px; }
-        #progress-container {
-            width: 100%; height: 12px; background: #111;
-            border: 1px solid #333; margin: 10px 0; position: relative;
-        }
-        #progress-bar {
-            width: 0%; height: 100%; background: #00ffcc;
-            box-shadow: 0 0 15px #00ffcc; transition: width 0.05s linear;
+        .command-text { font-size: 22px; font-weight: bold; color: white; margin-bottom: 5px; }
+        #progress-container { width: 100%; height: 10px; background: #111; border: 1px solid #333; margin: 8px 0; }
+        #progress-bar { width: 0%; height: 100%; background: #00ffcc; box-shadow: 0 0 10px #00ffcc; transition: width 0.05s linear; }
+
+        /* กรอบกล้องที่จะแสดงผลตลอดเวลา */
+        #camera-monitor {
+            position: fixed; 
+            right: 15px; 
+            bottom: 15px; 
+            width: 180px; 
+            height: 135px;
+            z-index: 9999; /* สูงที่สุด */
+            border: 2px solid #00ffcc;
+            border-radius: 10px;
+            background: #000;
+            overflow: hidden;
+            box-shadow: 0 0 20px rgba(0, 255, 204, 0.4);
         }
 
-        /* --- เทคนิคการซ่อนกล้องสำหรับมือถือ --- */
-        video {
-            position: absolute;
-            width: 1px;
-            height: 1px;
-            opacity: 0.01; /* ห้ามเป็น 0 หรือ display:none เพราะจะทำให้กล้องหยุดทำงานบน iOS/Android */
-            pointer-events: none;
+        #camera-canvas {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transform: scaleX(-1); /* Mirror ภาพให้ดูง่าย */
         }
+
+        /* ซ่อน Video ตัวจริงไว้เบื้องหลัง */
+        #video { position: fixed; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
     </style>
     <script src="https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.min.js"></script>
@@ -39,18 +48,23 @@
 <body>
 
     <div id="ui">
-        <div style="font-size:12px; color:#00ccaa;">SURGICAL SYSTEM v3.1 (STEALTH)</div>
+        <div style="font-size:10px; color:#00ccaa; letter-spacing:1px;">MONITORING ACTIVE</div>
         <div id="gesture-display" class="command-text">READY</div>
         <div id="progress-container"><div id="progress-bar"></div></div>
-        <div id="status-msg" style="font-size:12px; color:#aaa;">GENTLE PINKY CONTROL</div>
+    </div>
+
+    <div id="camera-monitor">
+        <canvas id="camera-canvas"></canvas>
     </div>
 
     <video id="video" autoplay muted playsinline></video>
 
     <script>
         const videoElement = document.getElementById('video');
+        const canvasElement = document.getElementById('camera-canvas');
+        const canvasCtx = canvasElement.getContext('2d');
 
-        /* --- 1. THREE.JS SETUP --- */
+        /* --- 1. THREE.JS --- */
         const scene = new THREE.Scene();
         const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
         const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -66,8 +80,8 @@
         const light = new THREE.PointLight(0xffffff, 1.2);
         light.position.set(10, 10, 10);
         scene.add(light);
-
         camera.position.z = 8;
+
         let targetZoom = 8;
         let targetQuaternion = new THREE.Quaternion();
 
@@ -77,50 +91,42 @@
             camera.position.z += (targetZoom - camera.position.z) * 0.1;
             renderer.render(scene, camera);
 
-            // บังคับให้ Video เล่นตลอดเวลา (ป้องกัน Mobile Sleep)
-            if (videoElement.paused && videoElement.readyState > 2) {
-                videoElement.play();
+            // วาดภาพจาก Video ลง Canvas ตลอดเวลา (ทำให้กล้องไม่หาย)
+            if (videoElement.readyState === videoElement.HAVE_ENOUGH_DATA) {
+                canvasCtx.drawImage(videoElement, 0, 0, canvasElement.width, canvasElement.height);
             }
+            
+            // กันวิดีโอหยุดทำงานเองบนมือถือ
+            if (videoElement.paused) videoElement.play();
         }
         animate();
 
-        /* --- 2. FINGER CHECK (MASTER LOGIC) --- */
+        /* --- 2. GESTURE LOGIC --- */
         function checkFingers(lm) {
             const d = (pt) => Math.sqrt(Math.pow(lm[pt].x - lm[0].x, 2) + Math.pow(lm[pt].y - lm[0].y, 2));
-            
-            // ใช้เกณฑ์ 1.1 เหมือนต้นแบบ v3.1 ของมึง
-            const pinkyIsExtended = d(20) > d(18) * 1.1;
-            const indexIsExtended = d(8) > d(6) * 1.1;
-            const middleIsExtended = d(12) > d(10) * 1.1;
-            const ringIsExtended = d(16) > d(14) * 1.1;
-
             return {
-                index: indexIsExtended,
-                middle: middleIsExtended,
-                ring: ringIsExtended,
-                pinky: pinkyIsExtended
+                index: d(8) > d(6) * 1.15,
+                middle: d(12) > d(10) * 1.15,
+                ring: d(16) > d(14) * 1.15,
+                pinky: d(20) > d(18) * 1.15
             };
         }
 
-        /* --- 3. GESTURE ENGINE --- */
         const hands = new Hands({locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`});
         hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.7, minTrackingConfidence: 0.7 });
 
         let activeGesture = "READY";
         let startTime = null;
         let isLocked = false;
-        const HOLD_DURATION = 1000;
 
         hands.onResults(res => {
             let detected = "READY";
-
             if (res.multiHandLandmarks?.length > 0) {
                 const lm = res.multiHandLandmarks[0];
                 const label = res.multiHandedness[0].label;
                 const f = checkFingers(lm);
                 const isFisted = !f.middle && !f.ring;
 
-                // ตรวจสอบตามมือที่ AI ตรวจพบ (รองรับการหันหน้ามือเข้า)
                 if (label === "Left") {
                     if (f.pinky && isFisted && !f.index) detected = "ROTATE LEFT";
                     else if (f.index && isFisted && !f.pinky) detected = "ROTATE RIGHT";
@@ -132,18 +138,15 @@
                 }
             }
 
-            // UI Feedback & Command execution
+            // UI และการหน่วงเวลา 1 วินาที
             if (detected !== "READY") {
                 if (detected === activeGesture) {
                     if (!isLocked) {
                         const elapsed = Date.now() - startTime;
-                        const progress = Math.min((elapsed / HOLD_DURATION) * 100, 100);
+                        const progress = Math.min((elapsed / 1000) * 100, 100);
                         document.getElementById("progress-bar").style.width = progress + "%";
                         document.getElementById("gesture-display").innerText = detected;
-                        if (elapsed >= HOLD_DURATION) {
-                            runCommand(detected);
-                            isLocked = true;
-                        }
+                        if (elapsed >= 1000) { runCommand(detected); isLocked = true; }
                     }
                 } else {
                     activeGesture = detected;
@@ -167,11 +170,9 @@
             if (cmd === "ROTATE RIGHT") q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), angle);
             if (cmd === "ROTATE UP") q.setFromAxisAngle(new THREE.Vector3(1, 0, 0), -angle);
             if (cmd === "ROTATE DOWN") q.setFromAxisAngle(new THREE.Vector3(1, 0, 0), angle);
-
             targetQuaternion.multiplyQuaternions(q, targetQuaternion);
             if (cmd === "ZOOM IN") targetZoom = Math.max(2, targetZoom - 2);
             if (cmd === "ZOOM OUT") targetZoom = Math.min(12, targetZoom + 2);
-
             renderer.domElement.style.filter = "brightness(2)";
             setTimeout(() => renderer.domElement.style.filter = "brightness(1)", 150);
         }
@@ -181,12 +182,6 @@
             width: 480, height: 360
         });
         cam.start();
-
-        window.addEventListener('resize', () => {
-            camera.aspect = window.innerWidth / window.innerHeight;
-            camera.updateProjectionMatrix();
-            renderer.setSize(window.innerWidth, window.innerHeight);
-        });
     </script>
 </body>
 </html>
