@@ -3,30 +3,29 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Surgical Dual-Hand Control v2.1</title>
+    <title>Surgical Control v2.2 - Fixed</title>
     <style>
-        body { margin:0; overflow:hidden; background:#050505; font-family: 'Courier New', Courier, monospace; }
+        body { margin:0; overflow:hidden; background:#000; font-family: 'Courier New', monospace; }
         #ui {
             position: fixed; top: 20px; left: 20px; color: #00ffcc; z-index: 10;
-            background: rgba(0,20,20,0.8); padding: 15px; border-left: 5px solid #00ffcc;
-            min-width: 250px;
+            background: rgba(0,30,30,0.9); padding: 20px; border-left: 5px solid #00ffcc;
+            min-width: 260px; pointer-events: none;
         }
-        .hand-label { font-size: 12px; color: #aaa; margin-bottom: 5px; }
-        .command-text { font-size: 24px; font-weight: bold; color: white; margin-bottom: 10px; }
+        .command-text { font-size: 28px; font-weight: bold; color: white; margin-bottom: 5px; }
         
-        /* Progress Bar Style */
+        /* Progress Bar - ทำให้เห็นชัดขึ้น */
         #progress-container {
-            width: 100%; height: 8px; background: rgba(255,255,255,0.1);
-            border-radius: 4px; overflow: hidden; display: none;
+            width: 100%; height: 12px; background: #111;
+            border: 1px solid #333; margin: 10px 0; display: block;
         }
         #progress-bar {
             width: 0%; height: 100%; background: #00ffcc;
-            transition: width 0.1s linear;
+            box-shadow: 0 0 10px #00ffcc;
         }
         
         video {
-            position: fixed; right: 10px; bottom: 10px; width: 160px; 
-            transform: scaleX(-1); border-radius: 10px; border: 1px solid #333;
+            position: fixed; right: 10px; bottom: 10px; width: 180px; 
+            transform: scaleX(-1); border-radius: 8px; border: 2px solid #00ffcc;
         }
     </style>
     <script src="https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.min.js"></script>
@@ -36,35 +35,29 @@
 <body>
 
     <div id="ui">
-        <div class="hand-label">SURGICAL INTERFACE v2.1</div>
-        <div id="gesture-display" class="command-text">WAITING...</div>
+        <div style="font-size:12px; color:#00ccaa;">SYSTEM ACTIVE</div>
+        <div id="gesture-display" class="command-text">SCANNING...</div>
         <div id="progress-container"><div id="progress-bar"></div></div>
-        <div style="font-size: 11px; margin-top: 10px; color: #00ccaa; line-height: 1.4;">
-            LEFT: Thumb=L | Index=R | 2Fing=UP | 3Fing=DOWN<br>
-            RIGHT: Thumb=ZOOM IN | Index=ZOOM OUT<br>
-            <span style="color:#ffcc00;">* HOLD 1 SEC TO EXECUTE *</span>
-        </div>
+        <div id="status-msg" style="font-size:11px; color:#888;">READY FOR INPUT</div>
     </div>
 
     <video id="video" autoplay muted playsinline></video>
 
     <script>
-        /* --- THREE.JS SCENE --- */
+        /* --- 1. THREE.JS SCENE SETUP --- */
         const scene = new THREE.Scene();
         const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
         const renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
         document.body.appendChild(renderer.domElement);
 
-        const light = new THREE.PointLight(0xffffff, 1.5);
-        light.position.set(5, 5, 5);
-        scene.add(light, new THREE.AmbientLight(0xffffff, 0.5));
-
         const cube = new THREE.Mesh(
             new THREE.BoxGeometry(2, 2, 2),
             [0xff4444, 0x44ff44, 0x4444ff, 0xffff44, 0xff44ff, 0x44ffff].map(c => new THREE.MeshStandardMaterial({color: c}))
         );
-        scene.add(cube);
+        scene.add(cube, new THREE.AmbientLight(0xffffff, 0.5), (() => {
+            const l = new THREE.PointLight(0xffffff, 1.5); l.position.set(5,5,5); return l;
+        })());
         camera.position.z = 6;
 
         let tRotX = 0, tRotY = 0, tZoom = 6;
@@ -77,84 +70,91 @@
         }
         animate();
 
-        /* --- GESTURE & HOLD LOGIC --- */
+        /* --- 2. GESTURE LOGIC --- */
         const display = document.getElementById("gesture-display");
         const progBar = document.getElementById("progress-bar");
-        const progCont = document.getElementById("progress-container");
+        const statusMsg = document.getElementById("status-msg");
 
         let currentGesture = "READY";
         let gestureStartTime = 0;
         let isExecuted = false; 
-        const HOLD_TIME = 1000; // 1 วินาที
+        const HOLD_TIME = 1000; 
 
+        // ฟังก์ชันเช็คนิ้วใหม่ (ลด Noise)
         function checkFingers(lm) {
-            const dist = (pt) => Math.sqrt(Math.pow(lm[pt].x - lm[0].x, 2) + Math.pow(lm[pt].y - lm[0].y, 2));
+            const getDist = (a, b) => Math.sqrt((lm[a].x-lm[b].x)**2 + (lm[a].y-lm[b].y)**2);
+            const baseDist = getDist(0, 5); // ระยะฝ่ามืออ้างอิง
             return {
-                thumb: dist(4) > dist(2) * 1.5,
-                index: dist(8) > dist(6),
-                middle: dist(12) > dist(10),
-                ring: dist(16) > dist(14)
+                thumb: getDist(4, 17) > baseDist * 0.8, // นิ้วโป้งกางออก
+                index: lm[8].y < lm[6].y,              // นิ้วชี้ชูขึ้น
+                middle: lm[12].y < lm[10].y,           // นิ้วกลางชูขึ้น
+                ring: lm[16].y < lm[14].y              // นิ้วนางชูขึ้น
             };
         }
 
         const hands = new Hands({locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`});
-        hands.setOptions({ maxNumHands: 2, modelComplexity: 1, minDetectionConfidence: 0.7, minTrackingConfidence: 0.7 });
+        hands.setOptions({ maxNumHands: 2, modelComplexity: 1, minDetectionConfidence: 0.6, minTrackingConfidence: 0.6 });
 
         hands.onResults(res => {
             let detectedCmd = "READY";
 
-            if (res.multiHandLandmarks?.length) {
-                res.multiHandLandmarks.forEach((lm, index) => {
-                    const label = res.multiHandedness[index].label; 
+            if (res.multiHandLandmarks && res.multiHandLandmarks.length > 0) {
+                for (let i = 0; i < res.multiHandLandmarks.length; i++) {
+                    const lm = res.multiHandLandmarks[i];
+                    const label = res.multiHandedness[i].label;
                     const f = checkFingers(lm);
 
-                    if (label === "Left") {
+                    if (label === "Left") { // คุมการหมุน
                         if (f.thumb && !f.index && !f.middle) detectedCmd = "ROTATE LEFT";
                         else if (!f.thumb && f.index && !f.middle) detectedCmd = "ROTATE RIGHT";
                         else if (f.index && f.middle && !f.ring) detectedCmd = "ROTATE UP";
                         else if (f.index && f.middle && f.ring) detectedCmd = "ROTATE DOWN";
                     } 
-                    else if (label === "Right") {
+                    else if (label === "Right") { // คุมซูม
                         if (f.thumb && !f.index) detectedCmd = "ZOOM IN";
                         else if (!f.thumb && f.index) detectedCmd = "ZOOM OUT";
                     }
-                });
+                }
             }
 
-            // --- HOLD TO CONFIRM LOGIC ---
+            // --- HOLDING SYSTEM ---
             if (detectedCmd !== "READY") {
                 if (detectedCmd === currentGesture) {
                     if (!isExecuted) {
                         let elapsed = Date.now() - gestureStartTime;
-                        let progress = Math.min((elapsed / HOLD_TIME) * 100, 100);
+                        let percent = Math.min((elapsed / HOLD_TIME) * 100, 100);
                         
-                        progCont.style.display = "block";
-                        progBar.style.width = progress + "%";
+                        progBar.style.width = percent + "%";
                         display.innerText = detectedCmd;
+                        statusMsg.innerText = `CHARGING... ${Math.round(percent)}%`;
 
                         if (elapsed >= HOLD_TIME) {
-                            executeAction(detectedCmd);
+                            executeCommand(detectedCmd);
                             isExecuted = true;
                         }
                     } else {
-                        display.innerHTML = `<span style="color:#00ffcc;">✓ ${detectedCmd}</span>`;
                         progBar.style.width = "100%";
+                        statusMsg.innerText = "ACTION COMPLETED (RELEASE HAND)";
+                        display.innerHTML = `<span style="color:#00ffcc;">DONE: ${detectedCmd}</span>`;
                     }
                 } else {
+                    // เปลี่ยนท่าทาง: Reset ตัวนับใหม่
                     currentGesture = detectedCmd;
                     gestureStartTime = Date.now();
                     isExecuted = false;
                 }
             } else {
+                // ปล่อยมือ: Reset ทุกอย่าง
                 currentGesture = "READY";
+                gestureStartTime = 0;
                 isExecuted = false;
-                display.innerText = "READY";
-                progCont.style.display = "none";
                 progBar.style.width = "0%";
+                display.innerText = "READY";
+                statusMsg.innerText = "WAITING FOR GESTURE";
             }
         });
 
-        function executeAction(cmd) {
+        function executeCommand(cmd) {
             if (cmd === "ROTATE LEFT") tRotY -= Math.PI/2;
             if (cmd === "ROTATE RIGHT") tRotY += Math.PI/2;
             if (cmd === "ROTATE UP") tRotX -= Math.PI/2;
@@ -162,9 +162,9 @@
             if (cmd === "ZOOM IN") tZoom = Math.max(2, tZoom - 2);
             if (cmd === "ZOOM OUT") tZoom = Math.min(12, tZoom + 2);
             
-            // Visual Feedback
-            document.body.style.boxShadow = "inset 0 0 50px #00ffcc";
-            setTimeout(() => { document.body.style.boxShadow = "none"; }, 300);
+            // Flash Effect
+            document.body.style.background = "#004444";
+            setTimeout(() => { document.body.style.background = "#000"; }, 150);
         }
 
         const cam = new Camera(document.getElementById("video"), {
@@ -172,12 +172,6 @@
             width: 480, height: 360, facingMode: "user"
         });
         cam.start();
-
-        window.addEventListener('resize', () => {
-            camera.aspect = window.innerWidth / window.innerHeight;
-            camera.updateProjectionMatrix();
-            renderer.setSize(window.innerWidth, window.innerHeight);
-        });
     </script>
 </body>
 </html>
