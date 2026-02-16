@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Surgical Control v3.0 - Palm Facing Fix</title>
+    <title>Surgical Control v3.1 - Fisted Pinky Fix</title>
     <style>
         body { margin:0; overflow:hidden; background:#000; font-family: 'Courier New', monospace; }
         #ui {
@@ -32,10 +32,10 @@
 <body>
 
     <div id="ui">
-        <div style="font-size:12px; color:#00ccaa;">SURGICAL SYSTEM v3.0</div>
+        <div style="font-size:12px; color:#00ccaa;">SURGICAL SYSTEM v3.1</div>
         <div id="gesture-display" class="command-text">READY</div>
         <div id="progress-container"><div id="progress-bar"></div></div>
-        <div id="status-msg" style="font-size:12px; color:#aaa;">PALM-IN MODE ACTIVE</div>
+        <div id="status-msg" style="font-size:12px; color:#aaa;">FISTED PINKY DETECTOR</div>
     </div>
 
     <video id="video" autoplay muted playsinline></video>
@@ -70,19 +70,23 @@
         }
         animate();
 
-        /* --- 2. FINGER CHECK (PALM-IN OPTIMIZED) --- */
+        /* --- 2. FINGER CHECK (FIST-PINKY OPTIMIZED) --- */
         function checkFingers(lm) {
-            // ใช้ระยะห่างจากข้อมือ (จุด 0) แทนพิกัด Y เพื่อรองรับการหันหน้ามือเข้าหาตัว
-            const getDist = (pt) => Math.sqrt(Math.pow(lm[pt].x - lm[0].x, 2) + Math.pow(lm[pt].y - lm[0].y, 2));
+            // หาระยะจากข้อมือ (0) ไปยังปลายนิ้วต่างๆ
+            const d = (pt) => Math.sqrt(Math.pow(lm[pt].x - lm[0].x, 2) + Math.pow(lm[pt].y - lm[0].y, 2));
             
-            // ระยะห่างของข้อนิ้ว (ใช้เป็นเกณฑ์ตัดสินว่านิ้วยืดหรือพับ)
-            const isExt = (tip, base) => getDist(tip) > getDist(base) * 1.2;
+            // นิ้วจะถือว่า "ยืด" เมื่อปลายนิ้วอยู่ห่างจากข้อมือมากกว่าข้อต่อกลางนิ้ว (PIP)
+            // และสำหรับท่ากำมือ: นิ้วก้อยต้องยาวกว่านิ้วนาง (16) อย่างชัดเจน
+            const pinkyIsExtended = d(20) > d(18) * 1.1;
+            const indexIsExtended = d(8) > d(6) * 1.1;
+            const middleIsExtended = d(12) > d(10) * 1.1;
+            const ringIsExtended = d(16) > d(14) * 1.1;
 
             return {
-                index: isExt(8, 6),
-                middle: isExt(12, 10),
-                ring: isExt(16, 14),
-                pinky: isExt(20, 18)
+                index: indexIsExtended,
+                middle: middleIsExtended,
+                ring: ringIsExtended,
+                pinky: pinkyIsExtended
             };
         }
 
@@ -108,20 +112,22 @@
                     const label = res.multiHandedness[i].label;
                     const f = checkFingers(lm);
 
-                    // เมื่อหันหน้ามือเข้าหาตัว บางที MediaPipe จะสลับ Left/Right 
-                    // โค้ดนี้จะยึดตามที่ AI ตรวจจับได้ ณ ขณะนั้น
+                    // กรองให้แม่นขึ้น: ถ้าชูนิ้วก้อย (Pinky) นิ้วกลางและนางต้องพับ (Fisted)
+                    const isFisted = !f.middle && !f.ring;
+
                     if (label === "Left") {
-                        if (f.pinky && !f.index && !f.middle && !f.ring) detected = "ROTATE LEFT";
-                        else if (!f.pinky && f.index && !f.middle && !f.ring) detected = "ROTATE RIGHT";
-                        else if (!f.pinky && f.index && f.middle && !f.ring) detected = "ROTATE UP";
-                        else if (!f.pinky && f.index && f.middle && f.ring) detected = "ROTATE DOWN";
+                        if (f.pinky && isFisted && !f.index) detected = "ROTATE LEFT";
+                        else if (f.index && isFisted && !f.pinky) detected = "ROTATE RIGHT";
+                        else if (f.index && f.middle && !f.ring && !f.pinky) detected = "ROTATE UP";
+                        else if (f.index && f.middle && f.ring && !f.pinky) detected = "ROTATE DOWN";
                     } else {
-                        if (f.pinky && !f.index && !f.middle && !f.ring) detected = "ZOOM IN";
-                        else if (!f.pinky && f.index && !f.middle && !f.ring) detected = "ZOOM OUT";
+                        if (f.pinky && isFisted && !f.index) detected = "ZOOM IN";
+                        else if (f.index && isFisted && !f.pinky) detected = "ZOOM OUT";
                     }
                 }
             }
 
+            // Logic เดิมที่ทำงานได้ดีอยู่แล้ว
             if (detected !== "READY") {
                 if (detected === activeGesture) {
                     if (!isLocked) {
@@ -134,6 +140,9 @@
                             runCommand(detected);
                             isLocked = true;
                         }
+                    } else {
+                        progBar.style.width = "100%";
+                        display.innerHTML = `<span style="color:#00ffcc;">✓ DONE</span>`;
                     }
                 } else {
                     activeGesture = detected;
