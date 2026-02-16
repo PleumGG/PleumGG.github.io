@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Surgical Control v2.3 - Final Fix</title>
+    <title>Surgical Control v2.4 - World Axis Fixed</title>
     <style>
         body { margin:0; overflow:hidden; background:#000; font-family: 'Courier New', monospace; }
         #ui {
@@ -32,8 +32,8 @@
 <body>
 
     <div id="ui">
-        <div style="font-size:12px; color:#00ccaa; letter-spacing: 2px;">SURGICAL NAVI</div>
-        <div id="gesture-display" class="command-text">INITIATING...</div>
+        <div style="font-size:12px; color:#00ccaa; letter-spacing: 2px;">SURGICAL NAVI v2.4</div>
+        <div id="gesture-display" class="command-text">READY</div>
         <div id="progress-container"><div id="progress-bar"></div></div>
         <div id="status-msg" style="font-size:12px; color:#aaa;">WAITING FOR HANDS</div>
     </div>
@@ -41,7 +41,7 @@
     <video id="video" autoplay muted playsinline></video>
 
     <script>
-        /* --- 1. THREE.JS --- */
+        /* --- 1. THREE.JS SETUP --- */
         const scene = new THREE.Scene();
         const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
         const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -49,37 +49,41 @@
         document.body.appendChild(renderer.domElement);
 
         const cube = new THREE.Mesh(
-            new THREE.BoxGeometry(2.2, 2.2, 2.2),
-            [0xff4444, 0x44ff44, 0x4444ff, 0xffff44, 0xff44ff, 0x44ffff].map(c => new THREE.MeshStandardMaterial({color: c, roughness: 0.3}))
+            new THREE.BoxGeometry(2.5, 2.5, 2.5),
+            [0xff4444, 0x44ff44, 0x4444ff, 0xffff44, 0xff44ff, 0x44ffff].map(c => new THREE.MeshStandardMaterial({color: c, roughness: 0.2}))
         );
-        scene.add(cube, new THREE.AmbientLight(0xffffff, 0.6), (() => {
-            const l = new THREE.PointLight(0xffffff, 1.2); l.position.set(5,5,5); return l;
-        })());
-        camera.position.z = 7;
+        scene.add(cube);
+        
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+        scene.add(ambientLight);
+        const pointLight = new THREE.PointLight(0xffffff, 1.2);
+        pointLight.position.set(10, 10, 10);
+        scene.add(pointLight);
 
-        let tRotX = 0, tRotY = 0, tZoom = 7;
+        camera.position.z = 8;
+        let tZoom = 8;
+
         function animate() {
             requestAnimationFrame(animate);
-            cube.rotation.x += (tRotX - cube.rotation.x) * 0.08;
-            cube.rotation.y += (tRotY - cube.rotation.y) * 0.08;
-            camera.position.z += (tZoom - camera.position.z) * 0.08;
+            // Smoothly move camera for zoom only
+            camera.position.z += (tZoom - camera.position.z) * 0.1;
             renderer.render(scene, camera);
         }
         animate();
 
-        /* --- 2. GESTURE & STABLE TIMER LOGIC --- */
+        /* --- 2. LOGIC VARIABLES --- */
         const display = document.getElementById("gesture-display");
         const progBar = document.getElementById("progress-bar");
         const statusMsg = document.getElementById("status-msg");
 
-        let activeGesture = "READY"; // ท่าที่กำลัง "ทำค้างไว้"
-        let startTime = null;        // เวลาที่เริ่มทำท่านั้น
-        let isLocked = false;        // ล็อคไว้หลังจากทำงานเสร็จ จนกว่าจะปล่อยมือ
-        const HOLD_DURATION = 1000;  // 1000ms = 1 วินาที
+        let activeGesture = "READY";
+        let startTime = null;
+        let isLocked = false;
+        const HOLD_DURATION = 1000;
 
         function checkFingers(lm) {
             const isExtended = (tip, pip) => lm[tip].y < lm[pip].y; 
-            const isThumbExtended = (tip, base) => Math.abs(lm[tip].x - lm[base].x) > 0.1;
+            const isThumbExtended = (tip, base) => Math.abs(lm[tip].x - lm[base].x) > 0.12;
 
             return {
                 thumb: isThumbExtended(4, 2),
@@ -89,8 +93,9 @@
             };
         }
 
+        /* --- 3. MEDIAPIPE HANDS --- */
         const hands = new Hands({locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`});
-        hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.75, minTrackingConfidence: 0.75 });
+        hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.7, minTrackingConfidence: 0.7 });
 
         hands.onResults(res => {
             let detected = "READY";
@@ -111,7 +116,7 @@
                 }
             }
 
-            // --- THE CORE LOGIC: STABLE HOLDING ---
+            // Logic Holding to Execute
             if (detected !== "READY") {
                 if (detected === activeGesture) {
                     if (!isLocked) {
@@ -125,23 +130,20 @@
 
                         if (elapsed >= HOLD_DURATION) {
                             runCommand(detected);
-                            isLocked = true; // ล็อคทันที! ไม่ให้หมุนต่อ
+                            isLocked = true;
                         }
                     } else {
-                        // ทำงานเสร็จแล้วแต่ยังไม่ปล่อยมือ
                         progBar.style.width = "100%";
                         display.innerHTML = `<span style="color:#00ffcc;">EXECUTION DONE</span>`;
                         statusMsg.innerText = "RELEASE HAND TO RESET";
                     }
                 } else {
-                    // เปลี่ยนท่าใหม่ หรือเพิ่งเริ่มตรวจจับ
                     activeGesture = detected;
                     startTime = Date.now();
                     isLocked = false;
                     progBar.style.width = "0%";
                 }
             } else {
-                // ปล่อยมือ (READY)
                 activeGesture = "READY";
                 startTime = null;
                 isLocked = false;
@@ -151,16 +153,22 @@
             }
         });
 
+        /* --- 4. COMMAND EXECUTION (WORLD AXIS FIXED) --- */
         function runCommand(cmd) {
             const step = Math.PI / 2;
-            if (cmd === "ROTATE LEFT") tRotY -= step;
-            if (cmd === "ROTATE RIGHT") tRotY += step;
-            if (cmd === "ROTATE UP") tRotX -= step;
-            if (cmd === "ROTATE DOWN") tRotX += step;
+            const xAxis = new THREE.Vector3(1, 0, 0); // แกน X ของโลก
+            const yAxis = new THREE.Vector3(0, 1, 0); // แกน Y ของโลก
+
+            // หมุนอิงตามแกนของโลก (World Space) จะไม่หลงทิศ
+            if (cmd === "ROTATE LEFT") cube.rotateOnWorldAxis(yAxis, -step);
+            if (cmd === "ROTATE RIGHT") cube.rotateOnWorldAxis(yAxis, step);
+            if (cmd === "ROTATE UP") cube.rotateOnWorldAxis(xAxis, -step);
+            if (cmd === "ROTATE DOWN") cube.rotateOnWorldAxis(xAxis, step);
+            
             if (cmd === "ZOOM IN") tZoom = Math.max(2, tZoom - 2);
             if (cmd === "ZOOM OUT") tZoom = Math.min(12, tZoom + 2);
 
-            // Flash effect ให้รู้ว่าทำงานแล้ว
+            // Flash effect feedback
             renderer.domElement.style.filter = "brightness(2)";
             setTimeout(() => renderer.domElement.style.filter = "brightness(1)", 200);
         }
@@ -170,6 +178,12 @@
             width: 480, height: 360
         });
         cam.start();
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
     </script>
 </body>
 </html>
