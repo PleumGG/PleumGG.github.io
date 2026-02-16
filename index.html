@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Surgical Control v2.8 - Gesture Conflict Fix</title>
+    <title>Surgical Control v2.9 - Pinky Replace Thumb</title>
     <style>
         body { margin:0; overflow:hidden; background:#000; font-family: 'Courier New', monospace; }
         #ui {
@@ -32,10 +32,10 @@
 <body>
 
     <div id="ui">
-        <div style="font-size:12px; color:#00ccaa;">SURGICAL SYSTEM v2.8</div>
+        <div style="font-size:12px; color:#00ccaa;">SURGICAL SYSTEM v2.9</div>
         <div id="gesture-display" class="command-text">READY</div>
         <div id="progress-container"><div id="progress-bar"></div></div>
-        <div id="status-msg" style="font-size:12px; color:#aaa;">GESTURE CONFLICT FIXED</div>
+        <div id="status-msg" style="font-size:12px; color:#aaa;">PINKY CONTROL ACTIVE</div>
     </div>
 
     <video id="video" autoplay muted playsinline></video>
@@ -70,20 +70,14 @@
         }
         animate();
 
-        /* --- 2. IMPROVED FINGER CHECK (STRICT MODE) --- */
-        function checkFingers(lm, label) {
+        /* --- 2. FINGER CHECK (NO THUMB USED) --- */
+        function checkFingers(lm) {
             const isExtended = (tip, pip) => lm[tip].y < lm[pip].y;
-
-            // Thumb Logic v2.7
-            let thumbIsOut = (label === "Right") ? (lm[4].x < lm[3].x && lm[4].x < lm[2].x) : (lm[4].x > lm[3].x && lm[4].x > lm[2].x);
-            const thumbIsUp = lm[4].y < lm[17].y; 
-
             return {
-                thumb: thumbIsOut && thumbIsUp,
                 index: isExtended(8, 6),
                 middle: isExtended(12, 10),
                 ring: isExtended(16, 14),
-                pinky: isExtended(20, 18) // เช็คนิ้วก้อยเพิ่ม
+                pinky: isExtended(20, 18)
             };
         }
 
@@ -107,20 +101,22 @@
                 for(let i=0; i < res.multiHandLandmarks.length; i++) {
                     const lm = res.multiHandLandmarks[i];
                     const label = res.multiHandedness[i].label;
-                    const f = checkFingers(lm, label);
+                    const f = checkFingers(lm);
 
                     if (label === "Left") {
-                        // ROTATE LEFT: โป้งอย่างเดียว (นิ้วอื่นต้องพับ)
-                        if (f.thumb && !f.index && !f.middle && !f.ring && !f.pinky) detected = "ROTATE LEFT";
-                        // ROTATE RIGHT: ชี้อย่างเดียว
-                        else if (!f.thumb && f.index && !f.middle && !f.ring && !f.pinky) detected = "ROTATE RIGHT";
-                        // ROTATE UP: ชี้ + กลาง (นิ้วอื่นต้องพับ)
-                        else if (!f.thumb && f.index && f.middle && !f.ring && !f.pinky) detected = "ROTATE UP";
-                        // ROTATE DOWN: ชี้ + กลาง + นาง (นิ้วก้อยต้องพับเด็ดขาด!)
-                        else if (!f.thumb && f.index && f.middle && f.ring && !f.pinky) detected = "ROTATE DOWN";
+                        // ROTATE LEFT: นิ้วก้อยอย่างเดียว (นิ้วอื่นพับ)
+                        if (f.pinky && !f.index && !f.middle && !f.ring) detected = "ROTATE LEFT";
+                        // ROTATE RIGHT: นิ้วชี้อย่างเดียว
+                        else if (!f.pinky && f.index && !f.middle && !f.ring) detected = "ROTATE RIGHT";
+                        // ROTATE UP: นิ้วชี้ + กลาง
+                        else if (!f.pinky && f.index && f.middle && !f.ring) detected = "ROTATE UP";
+                        // ROTATE DOWN: นิ้วชี้ + กลาง + นาง
+                        else if (!f.pinky && f.index && f.middle && f.ring) detected = "ROTATE DOWN";
                     } else if (label === "Right") {
-                        if (f.thumb && !f.index && !f.middle && !f.ring && !f.pinky) detected = "ZOOM IN";
-                        else if (!f.thumb && f.index && !f.middle && !f.ring && !f.pinky) detected = "ZOOM OUT";
+                        // ZOOM IN: นิ้วก้อยอย่างเดียว
+                        if (f.pinky && !f.index && !f.middle && !f.ring) detected = "ZOOM IN";
+                        // ZOOM OUT: นิ้วชี้อย่างเดียว
+                        else if (!f.pinky && f.index && !f.middle && !f.ring) detected = "ZOOM OUT";
                     }
                 }
             }
@@ -132,14 +128,14 @@
                         const progress = Math.min((elapsed / HOLD_DURATION) * 100, 100);
                         progBar.style.width = progress + "%";
                         display.innerText = detected;
-                        statusMsg.innerText = `CONFIRMING... ${Math.round(progress)}%`;
+                        statusMsg.innerText = `HOLDING... ${Math.round(progress)}%`;
                         if (elapsed >= HOLD_DURATION) {
                             runCommand(detected);
                             isLocked = true;
                         }
                     } else {
                         progBar.style.width = "100%";
-                        display.innerHTML = `<span style="color:#00ffcc;">✓ DONE</span>`;
+                        display.innerHTML = `<span style="color:#00ffcc;">✓ EXECUTED</span>`;
                     }
                 } else {
                     activeGesture = detected;
