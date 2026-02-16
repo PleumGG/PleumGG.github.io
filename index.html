@@ -3,11 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Surgical Control v3.1 - Fisted Pinky Fix</title>
+    <title>Surgical Control v3.2 - Persistent Camera</title>
     <style>
         body { margin:0; overflow:hidden; background:#000; font-family: 'Courier New', monospace; }
+        
+        /* UI Panel */
         #ui {
-            position: fixed; top: 20px; left: 20px; color: #00ffcc; z-index: 10;
+            position: fixed; top: 20px; left: 20px; color: #00ffcc; z-index: 100;
             background: rgba(0,25,25,0.9); padding: 20px; border-left: 5px solid #00ffcc;
             min-width: 280px; pointer-events: none;
         }
@@ -20,9 +22,21 @@
             width: 0%; height: 100%; background: #00ffcc;
             box-shadow: 0 0 15px #00ffcc; transition: width 0.05s linear;
         }
+
+        /* กล้อง - บังคับให้แสดงผลตลอดเวลา (Persistent) */
         video {
-            position: fixed; right: 10px; bottom: 10px; width: 160px; 
-            transform: scaleX(-1); border-radius: 8px; border: 1px solid #333;
+            position: fixed; 
+            right: 20px; 
+            bottom: 20px; 
+            width: 200px; /* ปรับขนาดให้ใหญ่ขึ้นนิดนึงจะได้เห็นมือชัดๆ */
+            height: auto;
+            transform: scaleX(-1); 
+            border-radius: 12px; 
+            border: 2px solid #00ffcc; 
+            background: #222;
+            z-index: 1000; /* ดันให้อยู่บนสุดเหนือทุกอย่าง */
+            box-shadow: 0 0 20px rgba(0, 255, 204, 0.3);
+            display: block !important; /* ห้ามโดนซ่อน */
         }
     </style>
     <script src="https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.min.js"></script>
@@ -32,10 +46,10 @@
 <body>
 
     <div id="ui">
-        <div style="font-size:12px; color:#00ccaa;">SURGICAL SYSTEM v3.1</div>
+        <div style="font-size:12px; color:#00ccaa;">SURGICAL SYSTEM v3.2</div>
         <div id="gesture-display" class="command-text">READY</div>
         <div id="progress-container"><div id="progress-bar"></div></div>
-        <div id="status-msg" style="font-size:12px; color:#aaa;">FISTED PINKY DETECTOR</div>
+        <div id="status-msg" style="font-size:12px; color:#aaa;">CAMERA ALWAYS ON</div>
     </div>
 
     <video id="video" autoplay muted playsinline></video>
@@ -70,23 +84,14 @@
         }
         animate();
 
-        /* --- 2. FINGER CHECK (FIST-PINKY OPTIMIZED) --- */
+        /* --- 2. FINGER CHECK (STABLE) --- */
         function checkFingers(lm) {
-            // หาระยะจากข้อมือ (0) ไปยังปลายนิ้วต่างๆ
             const d = (pt) => Math.sqrt(Math.pow(lm[pt].x - lm[0].x, 2) + Math.pow(lm[pt].y - lm[0].y, 2));
-            
-            // นิ้วจะถือว่า "ยืด" เมื่อปลายนิ้วอยู่ห่างจากข้อมือมากกว่าข้อต่อกลางนิ้ว (PIP)
-            // และสำหรับท่ากำมือ: นิ้วก้อยต้องยาวกว่านิ้วนาง (16) อย่างชัดเจน
-            const pinkyIsExtended = d(20) > d(18) * 1.1;
-            const indexIsExtended = d(8) > d(6) * 1.1;
-            const middleIsExtended = d(12) > d(10) * 1.1;
-            const ringIsExtended = d(16) > d(14) * 1.1;
-
             return {
-                index: indexIsExtended,
-                middle: middleIsExtended,
-                ring: ringIsExtended,
-                pinky: pinkyIsExtended
+                index: d(8) > d(6) * 1.1,
+                middle: d(12) > d(10) * 1.1,
+                ring: d(16) > d(14) * 1.1,
+                pinky: d(20) > d(18) * 1.1
             };
         }
 
@@ -105,14 +110,11 @@
 
         hands.onResults(res => {
             let detected = "READY";
-
             if (res.multiHandLandmarks?.length > 0) {
                 for(let i=0; i < res.multiHandLandmarks.length; i++) {
                     const lm = res.multiHandLandmarks[i];
                     const label = res.multiHandedness[i].label;
                     const f = checkFingers(lm);
-
-                    // กรองให้แม่นขึ้น: ถ้าชูนิ้วก้อย (Pinky) นิ้วกลางและนางต้องพับ (Fisted)
                     const isFisted = !f.middle && !f.ring;
 
                     if (label === "Left") {
@@ -127,7 +129,6 @@
                 }
             }
 
-            // Logic เดิมที่ทำงานได้ดีอยู่แล้ว
             if (detected !== "READY") {
                 if (detected === activeGesture) {
                     if (!isLocked) {
@@ -135,14 +136,10 @@
                         const progress = Math.min((elapsed / HOLD_DURATION) * 100, 100);
                         progBar.style.width = progress + "%";
                         display.innerText = detected;
-                        statusMsg.innerText = `HOLDING... ${Math.round(progress)}%`;
                         if (elapsed >= HOLD_DURATION) {
                             runCommand(detected);
                             isLocked = true;
                         }
-                    } else {
-                        progBar.style.width = "100%";
-                        display.innerHTML = `<span style="color:#00ffcc;">✓ DONE</span>`;
                     }
                 } else {
                     activeGesture = detected;
@@ -180,6 +177,13 @@
             width: 480, height: 360
         });
         cam.start();
+
+        // Handle Resize
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
     </script>
 </body>
 </html>
