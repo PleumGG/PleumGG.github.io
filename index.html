@@ -3,56 +3,58 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Surgical Control v4.1 - Fix Aspect Ratio</title>
+    <title>Surgical Control v4.2 - Final Aspect Fix</title>
     <style>
         body { margin:0; overflow:hidden; background:#000; font-family: 'Courier New', monospace; touch-action: none; }
         
         #ui {
             position: fixed; top: 15px; left: 15px; color: #00ffcc; z-index: 1000;
             background: rgba(0,25,25,0.85); padding: 15px; border-left: 5px solid #00ffcc;
-            min-width: 220px; pointer-events: none; border-radius: 0 8px 8px 0;
+            min-width: 200px; pointer-events: none; border-radius: 0 8px 8px 0;
         }
         .command-text { font-size: 22px; font-weight: bold; color: white; margin-bottom: 5px; }
-        #progress-container { width: 100%; height: 10px; background: #111; border: 1px solid #333; margin: 8px 0; }
+        #progress-container { width: 100%; height: 8px; background: #111; margin: 8px 0; }
         #progress-bar { width: 0%; height: 100%; background: #00ffcc; box-shadow: 0 0 10px #00ffcc; transition: width 0.05s linear; }
 
-        /* กรอบกล้อง - ปรับขนาดให้เป็นสัดส่วนมาตรฐานมือถือ */
+        /* ล็อคกรอบกล้องให้เป็นสัดส่วน 1:1 และห้ามบีบภาพ */
         #camera-monitor {
             position: fixed; 
-            right: 15px; 
-            bottom: 15px; 
-            width: 150px; 
-            height: 150px; /* ทำเป็นสี่เหลี่ยมจัตุรัสให้ดูเท่แบบสโคปหมอ */
+            right: 20px; 
+            bottom: 20px; 
+            width: 140px; 
+            height: 140px;
             z-index: 9999; 
             border: 2px solid #00ffcc;
-            border-radius: 50%; /* เปลี่ยนเป็นวงกลมดูเป็น Surgical Monitor มากขึ้น */
+            border-radius: 20px; /* ขอบมนสวยๆ */
             background: #000;
-            overflow: hidden;
+            overflow: hidden; /* สำคัญ: เพื่อ Crop ส่วนที่เกินออก */
             box-shadow: 0 0 20px rgba(0, 255, 204, 0.4);
+            display: block !important;
+            visibility: visible !important;
         }
 
-        #camera-canvas {
-            width: 100%;
-            height: 100%;
-            transform: scaleX(-1); /* Mirror ภาพ */
+        /* ใช้ object-fit: cover เพื่อให้ภาพขยายเต็มกรอบโดยไม่เสียสัดส่วน (หน้าไม่แบน) */
+        #video {
+            width: 100% !important;
+            height: 100% !important;
+            object-fit: cover !important;
+            transform: scaleX(-1); /* Mirror */
+            display: block !important;
+            background: #000;
         }
-
-        #video { position: fixed; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
     </style>
 </head>
 <body>
 
     <div id="ui">
-        <div style="font-size:10px; color:#00ccaa;">MONITORING v4.1</div>
+        <div style="font-size:10px; color:#00ccaa;">SURGICAL NAVI v4.2</div>
         <div id="gesture-display" class="command-text">READY</div>
         <div id="progress-container"><div id="progress-bar"></div></div>
     </div>
 
     <div id="camera-monitor">
-        <canvas id="camera-canvas" width="300" height="300"></canvas>
+        <video id="video" autoplay muted playsinline></video>
     </div>
-
-    <video id="video" autoplay muted playsinline></video>
 
     <script src="https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.min.js"></script>
@@ -60,8 +62,6 @@
 
     <script>
         const videoElement = document.getElementById('video');
-        const canvasElement = document.getElementById('camera-canvas');
-        const canvasCtx = canvasElement.getContext('2d');
 
         /* --- 1. THREE.JS --- */
         const scene = new THREE.Scene();
@@ -72,10 +72,10 @@
 
         const cube = new THREE.Mesh(
             new THREE.BoxGeometry(2.5, 2.5, 2.5),
-            [0xff4444, 0x44ff44, 0x4444ff, 0xffff44, 0xff44ff, 0x44ffff].map(c => new THREE.MeshStandardMaterial({color: c, roughness: 0.2}))
+            [0xff4444, 0x44ff44, 0x4444ff, 0xffff44, 0xff44ff, 0x44ffff].map(c => new THREE.MeshStandardMaterial({color: c}))
         );
         scene.add(cube);
-        scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+        scene.add(new THREE.AmbientLight(0xffffff, 0.7));
         camera.position.z = 8;
 
         let targetZoom = 8;
@@ -87,36 +87,12 @@
             camera.position.z += (targetZoom - camera.position.z) * 0.1;
             renderer.render(scene, camera);
 
-            // วาดภาพแบบ "Aspect Ratio Fix" (Center Crop)
-            if (videoElement.readyState === videoElement.HAVE_ENOUGH_DATA) {
-                const vW = videoElement.videoWidth;
-                const vH = videoElement.videoHeight;
-                const cW = canvasElement.width;
-                const cH = canvasElement.height;
-                
-                // คำนวณสัดส่วนเพื่อให้ภาพไม่แบน
-                const aspect = vW / vH;
-                let drawW, drawH, offsetX, offsetY;
-                
-                if (aspect > 1) { // แนวนอน
-                    drawH = vH;
-                    drawW = vH; // ตัดให้เป็นจัตุรัส
-                    offsetX = (vW - vH) / 2;
-                    offsetY = 0;
-                } else { // แนวตั้ง
-                    drawW = vW;
-                    drawH = vW;
-                    offsetX = 0;
-                    offsetY = (vH - vW) / 2;
-                }
-
-                canvasCtx.drawImage(videoElement, offsetX, offsetY, drawW, drawH, 0, 0, cW, cH);
-            }
+            // กันวิดีโอหยุดทำงานเอง
             if (videoElement.paused) videoElement.play();
         }
         animate();
 
-        /* --- 2. GESTURE & CAMERA --- */
+        /* --- 2. GESTURE --- */
         function checkFingers(lm) {
             const d = (pt) => Math.sqrt(Math.pow(lm[pt].x - lm[0].x, 2) + Math.pow(lm[pt].y - lm[0].y, 2));
             return {
@@ -153,6 +129,7 @@
                 }
             }
 
+            // บังคับการแสดงผล UI
             if (detected !== "READY") {
                 if (detected === activeGesture) {
                     if (!isLocked) {
@@ -189,9 +166,15 @@
 
         const cam = new Camera(videoElement, {
             onFrame: async () => { await hands.send({image: videoElement}); },
-            width: 480, height: 360
+            width: 640, height: 480
         });
         cam.start();
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
     </script>
 </body>
 </html>
