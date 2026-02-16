@@ -2,50 +2,36 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Surgical Control v3.3 - Camera Locked</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Surgical Control v3.4 - Mobile Fixed</title>
     <style>
-        body { margin:0; overflow:hidden; background:#000; font-family: 'Courier New', monospace; }
+        body { margin:0; overflow:hidden; background:#000; font-family: 'Courier New', monospace; touch-action: none; }
         
         #ui {
-            position: fixed; top: 20px; left: 20px; color: #00ffcc; z-index: 100;
-            background: rgba(0,25,25,0.9); padding: 20px; border-left: 5px solid #00ffcc;
-            min-width: 280px; pointer-events: none;
+            position: fixed; top: 10px; left: 10px; color: #00ffcc; z-index: 100;
+            background: rgba(0,20,20,0.8); padding: 15px; border-left: 4px solid #00ffcc;
+            min-width: 200px; pointer-events: none;
         }
-        .command-text { font-size: 26px; font-weight: bold; color: white; margin-bottom: 5px; }
-        #progress-container {
-            width: 100%; height: 15px; background: #111;
-            border: 1px solid #333; margin: 10px 0; position: relative;
-        }
-        #progress-bar {
-            width: 0%; height: 100%; background: #00ffcc;
-            box-shadow: 0 0 15px #00ffcc; transition: width 0.05s linear;
-        }
+        .command-text { font-size: 20px; font-weight: bold; color: white; }
+        #progress-container { width: 100%; height: 10px; background: #111; margin: 8px 0; }
+        #progress-bar { width: 0%; height: 100%; background: #00ffcc; transition: width 0.05s linear; }
 
-        /* Container พิเศษเพื่อล็อคตำแหน่งกล้อง */
-        #cam-container {
+        /* Canvas ที่จะแสดงภาพกล้องแทน Video */
+        #camera-view {
             position: fixed; 
-            right: 20px; 
-            bottom: 20px; 
-            width: 240px; 
-            height: 180px;
-            z-index: 9999; /* สูงที่สุดในหน้าจอ */
+            right: 10px; 
+            bottom: 10px; 
+            width: 150px; 
+            height: 112px;
+            z-index: 9999; 
             border: 2px solid #00ffcc;
-            border-radius: 12px;
-            overflow: hidden;
-            background: #111;
-            box-shadow: 0 0 20px rgba(0, 255, 204, 0.4);
+            border-radius: 8px;
+            background: #000;
+            transform: scaleX(-1); /* Mirror */
         }
 
-        video {
-            width: 100% !important;
-            height: 100% !important;
-            object-fit: cover;
-            transform: scaleX(-1); /* Mirror */
-            display: block !important; /* ป้องกันการโดนสั่ง Hide */
-            opacity: 1 !important;
-            visibility: visible !important;
-        }
+        /* ซ่อน Video ตัวจริงทิ้งไปเลย */
+        #video { display: none; opacity: 0; position: absolute; pointer-events: none; }
     </style>
     <script src="https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.min.js"></script>
@@ -54,17 +40,19 @@
 <body>
 
     <div id="ui">
-        <div style="font-size:12px; color:#00ccaa;">SURGICAL SYSTEM v3.3</div>
+        <div style="font-size:10px; color:#00ccaa;">SURGICAL NAVI v3.4</div>
         <div id="gesture-display" class="command-text">READY</div>
         <div id="progress-container"><div id="progress-bar"></div></div>
-        <div id="status-msg" style="font-size:12px; color:#aaa;">CAMERA PERMANENTLY ON</div>
     </div>
 
-    <div id="cam-container">
-        <video id="video" autoplay muted playsinline></video>
-    </div>
+    <canvas id="camera-view"></canvas>
+    <video id="video" autoplay muted playsinline></video>
 
     <script>
+        const videoElement = document.getElementById('video');
+        const canvasElement = document.getElementById('camera-view');
+        const canvasCtx = canvasElement.getContext('2d');
+
         /* --- 1. THREE.JS --- */
         const scene = new THREE.Scene();
         const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
@@ -73,13 +61,13 @@
         document.body.appendChild(renderer.domElement);
 
         const cube = new THREE.Mesh(
-            new THREE.BoxGeometry(2.5, 2.5, 2.5),
-            [0xff4444, 0x44ff44, 0x4444ff, 0xffff44, 0xff44ff, 0x44ffff].map(c => new THREE.MeshStandardMaterial({color: c, roughness: 0.2}))
+            new THREE.BoxGeometry(2.2, 2.2, 2.2),
+            [0xff4444, 0x44ff44, 0x4444ff, 0xffff44, 0xff44ff, 0x44ffff].map(c => new THREE.MeshStandardMaterial({color: c}))
         );
         scene.add(cube);
         scene.add(new THREE.AmbientLight(0xffffff, 0.6));
-        const light = new THREE.PointLight(0xffffff, 1.2);
-        light.position.set(10, 10, 10);
+        const light = new THREE.PointLight(0xffffff, 1);
+        light.position.set(5, 5, 5);
         scene.add(light);
         camera.position.z = 8;
 
@@ -95,49 +83,45 @@
         animate();
 
         /* --- 2. LOGIC --- */
-        const display = document.getElementById("gesture-display");
-        const progBar = document.getElementById("progress-bar");
-        const vEle = document.getElementById("video");
-
         function checkFingers(lm) {
             const d = (pt) => Math.sqrt(Math.pow(lm[pt].x - lm[0].x, 2) + Math.pow(lm[pt].y - lm[0].y, 2));
             return {
-                index: d(8) > d(6) * 1.1,
-                middle: d(12) > d(10) * 1.1,
-                ring: d(16) > d(14) * 1.1,
-                pinky: d(20) > d(18) * 1.1
+                index: d(8) > d(6) * 1.15,
+                middle: d(12) > d(10) * 1.15,
+                ring: d(16) > d(14) * 1.15,
+                pinky: d(20) > d(18) * 1.15
             };
         }
 
         let activeGesture = "READY";
         let startTime = null;
         let isLocked = false;
-        const HOLD_DURATION = 1000;
 
         const hands = new Hands({locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`});
-        hands.setOptions({ maxNumHands: 2, modelComplexity: 1, minDetectionConfidence: 0.7, minTrackingConfidence: 0.7 });
+        hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.7, minTrackingConfidence: 0.7 });
 
         hands.onResults(res => {
-            // ป้องกัน MediaPipe มาแอบปิดกล้อง
-            if (vEle.style.display === 'none') vEle.style.display = 'block';
+            // วาดภาพจาก Video ลง Canvas ตลอดเวลา (เพื่อให้กล้องไม่หาย)
+            canvasCtx.save();
+            canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+            canvasCtx.drawImage(res.image, 0, 0, canvasElement.width, canvasElement.height);
+            canvasCtx.restore();
 
             let detected = "READY";
             if (res.multiHandLandmarks?.length > 0) {
-                for(let i=0; i < res.multiHandLandmarks.length; i++) {
-                    const lm = res.multiHandLandmarks[i];
-                    const label = res.multiHandedness[i].label;
-                    const f = checkFingers(lm);
-                    const isFisted = !f.middle && !f.ring;
+                const lm = res.multiHandLandmarks[0];
+                const label = res.multiHandedness[0].label;
+                const f = checkFingers(lm);
+                const isFisted = !f.middle && !f.ring;
 
-                    if (label === "Left") {
-                        if (f.pinky && isFisted && !f.index) detected = "ROTATE LEFT";
-                        else if (f.index && isFisted && !f.pinky) detected = "ROTATE RIGHT";
-                        else if (f.index && f.middle && !f.ring && !f.pinky) detected = "ROTATE UP";
-                        else if (f.index && f.middle && f.ring && !f.pinky) detected = "ROTATE DOWN";
-                    } else {
-                        if (f.pinky && isFisted && !f.index) detected = "ZOOM IN";
-                        else if (f.index && isFisted && !f.pinky) detected = "ZOOM OUT";
-                    }
+                if (label === "Left") {
+                    if (f.pinky && isFisted && !f.index) detected = "ROTATE LEFT";
+                    else if (f.index && isFisted && !f.pinky) detected = "ROTATE RIGHT";
+                    else if (f.index && f.middle && !f.ring && !f.pinky) detected = "ROTATE UP";
+                    else if (f.index && f.middle && f.ring && !f.pinky) detected = "ROTATE DOWN";
+                } else {
+                    if (f.pinky && isFisted && !f.index) detected = "ZOOM IN";
+                    else if (f.index && isFisted && !f.pinky) detected = "ZOOM OUT";
                 }
             }
 
@@ -145,26 +129,23 @@
                 if (detected === activeGesture) {
                     if (!isLocked) {
                         const elapsed = Date.now() - startTime;
-                        const progress = Math.min((elapsed / HOLD_DURATION) * 100, 100);
-                        progBar.style.width = progress + "%";
-                        display.innerText = detected;
-                        if (elapsed >= HOLD_DURATION) {
-                            runCommand(detected);
-                            isLocked = true;
-                        }
+                        const progress = Math.min((elapsed / 1000) * 100, 100);
+                        document.getElementById("progress-bar").style.width = progress + "%";
+                        document.getElementById("gesture-display").innerText = detected;
+                        if (elapsed >= 1000) { runCommand(detected); isLocked = true; }
                     }
                 } else {
                     activeGesture = detected;
                     startTime = Date.now();
                     isLocked = false;
-                    progBar.style.width = "0%";
+                    document.getElementById("progress-bar").style.width = "0%";
                 }
             } else {
                 activeGesture = "READY";
                 startTime = null;
                 isLocked = false;
-                progBar.style.width = "0%";
-                display.innerText = "READY";
+                document.getElementById("progress-bar").style.width = "0%";
+                document.getElementById("gesture-display").innerText = "READY";
             }
         });
 
@@ -180,21 +161,15 @@
             if (cmd === "ZOOM IN") targetZoom = Math.max(2, targetZoom - 2);
             if (cmd === "ZOOM OUT") targetZoom = Math.min(12, targetZoom + 2);
 
-            renderer.domElement.style.filter = "brightness(2)";
+            renderer.domElement.style.filter = "brightness(1.8)";
             setTimeout(() => renderer.domElement.style.filter = "brightness(1)", 150);
         }
 
-        const cam = new Camera(vEle, {
-            onFrame: async () => { await hands.send({image: vEle}); },
+        const cam = new Camera(videoElement, {
+            onFrame: async () => { await hands.send({image: videoElement}); },
             width: 480, height: 360
         });
         cam.start();
-
-        window.addEventListener('resize', () => {
-            camera.aspect = window.innerWidth / window.innerHeight;
-            camera.updateProjectionMatrix();
-            renderer.setSize(window.innerWidth, window.innerHeight);
-        });
     </script>
 </body>
 </html>
