@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Surgical Control v2.6 - Stable Thumb Fix</title>
+    <title>Surgical Control v2.7 - Ultra Stable Thumb</title>
     <style>
         body { margin:0; overflow:hidden; background:#000; font-family: 'Courier New', monospace; }
         #ui {
@@ -32,7 +32,7 @@
 <body>
 
     <div id="ui">
-        <div style="font-size:12px; color:#00ccaa; letter-spacing: 1px;">SURGICAL NAVI v2.6</div>
+        <div style="font-size:12px; color:#00ccaa;">SURGICAL SYSTEM v2.7</div>
         <div id="gesture-display" class="command-text">READY</div>
         <div id="progress-container"><div id="progress-bar"></div></div>
         <div id="status-msg" style="font-size:12px; color:#aaa;">WAITING FOR HANDS</div>
@@ -41,7 +41,7 @@
     <video id="video" autoplay muted playsinline></video>
 
     <script>
-        /* --- 1. THREE.JS SETUP (QUATERNION SYSTEM) --- */
+        /* --- 1. THREE.JS SETUP --- */
         const scene = new THREE.Scene();
         const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
         const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -64,36 +64,37 @@
 
         function animate() {
             requestAnimationFrame(animate);
-            cube.quaternion.slerp(targetQuaternion, 0.15); // หมุนนุ่มๆ แต่แม่นยำ
+            cube.quaternion.slerp(targetQuaternion, 0.15);
             camera.position.z += (targetZoom - camera.position.z) * 0.1;
             renderer.render(scene, camera);
         }
         animate();
 
-        /* --- 2. IMPROVED FINGER DETECTION --- */
-        function checkFingers(lm) {
+        /* --- 2. ADVANCED FINGER CHECK --- */
+        function checkFingers(lm, label) {
             const isExtended = (tip, pip) => lm[tip].y < lm[pip].y;
 
-            // คำนวณขนาดฝ่ามือเพื่อใช้เป็นเกณฑ์อ้างอิง (Dynamic Scaling)
-            const palmSize = Math.sqrt(
-                Math.pow(lm[0].x - lm[9].x, 2) + Math.pow(lm[0].y - lm[9].y, 2)
-            );
+            // เช็คนิ้วโป้งแบบใช้ความต่างของแกน X (แยกซ้าย-ขวา)
+            // สำหรับกล้อง Mirror: มือขวา (Right) นิ้วโป้งจะกางไปทางซ้ายของมือ, มือซ้าย (Left) นิ้วโป้งกางไปทางขวา
+            let thumbIsOut = false;
+            if (label === "Right") {
+                thumbIsOut = lm[4].x < lm[3].x && lm[4].x < lm[2].x; // กางออกทางซ้าย (ในกล้อง)
+            } else {
+                thumbIsOut = lm[4].x > lm[3].x && lm[4].x > lm[2].x; // กางออกทางขวา (ในกล้อง)
+            }
 
-            // เช็คนิ้วโป้งโดยวัดระยะจากปลายนิ้ว (4) ไปยังโคนนิ้วก้อย (17) 
-            // วิธีนี้แยกแยะท่า "กางนิ้วโป้ง" ออกจากการ "กำมือ" ได้เสถียรที่สุด
-            const thumbDistance = Math.sqrt(
-                Math.pow(lm[4].x - lm[17].x, 2) + Math.pow(lm[4].y - lm[17].y, 2)
-            );
+            // เงื่อนไขเสริม: นิ้วโป้งต้องไม่อยู่ต่ำเกินไป (ป้องกันการคว่ำมือแล้วสับสน)
+            const thumbIsUp = lm[4].y < lm[17].y; 
 
             return {
-                thumb: thumbDistance > palmSize * 0.7, // ปรับค่า 0.7 เพื่อความ sensitive ที่พอดี
+                thumb: thumbIsOut && thumbIsUp,
                 index: isExtended(8, 6),
                 middle: isExtended(12, 10),
                 ring: isExtended(16, 14)
             };
         }
 
-        /* --- 3. GESTURE & PROGRESS LOGIC --- */
+        /* --- 3. GESTURE & LOGIC --- */
         const display = document.getElementById("gesture-display");
         const progBar = document.getElementById("progress-bar");
         const statusMsg = document.getElementById("status-msg");
@@ -104,24 +105,27 @@
         const HOLD_DURATION = 1000;
 
         const hands = new Hands({locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`});
-        hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.75, minTrackingConfidence: 0.75 });
+        hands.setOptions({ maxNumHands: 2, modelComplexity: 1, minDetectionConfidence: 0.8, minTrackingConfidence: 0.8 });
 
         hands.onResults(res => {
             let detected = "READY";
 
             if (res.multiHandLandmarks?.length > 0) {
-                const lm = res.multiHandLandmarks[0];
-                const label = res.multiHandedness[0].label;
-                const f = checkFingers(lm);
+                // วนลูปรองรับ 2 มือพร้อมกัน
+                for(let i=0; i < res.multiHandLandmarks.length; i++) {
+                    const lm = res.multiHandLandmarks[i];
+                    const label = res.multiHandedness[i].label;
+                    const f = checkFingers(lm, label);
 
-                if (label === "Left") {
-                    if (f.thumb && !f.index && !f.middle) detected = "ROTATE LEFT";
-                    else if (!f.thumb && f.index && !f.middle) detected = "ROTATE RIGHT";
-                    else if (f.index && f.middle && !f.ring) detected = "ROTATE UP";
-                    else if (f.index && f.middle && f.ring) detected = "ROTATE DOWN";
-                } else {
-                    if (f.thumb && !f.index) detected = "ZOOM IN";
-                    else if (!f.thumb && f.index) detected = "ZOOM OUT";
+                    if (label === "Left") {
+                        if (f.thumb && !f.index && !f.middle) detected = "ROTATE LEFT";
+                        else if (!f.thumb && f.index && !f.middle) detected = "ROTATE RIGHT";
+                        else if (f.index && f.middle && !f.ring) detected = "ROTATE UP";
+                        else if (f.index && f.middle && f.ring) detected = "ROTATE DOWN";
+                    } else if (label === "Right") {
+                        if (f.thumb && !f.index) detected = "ZOOM IN";
+                        else if (!f.thumb && f.index) detected = "ZOOM OUT";
+                    }
                 }
             }
 
@@ -130,11 +134,9 @@
                     if (!isLocked) {
                         const elapsed = Date.now() - startTime;
                         const progress = Math.min((elapsed / HOLD_DURATION) * 100, 100);
-                        
                         progBar.style.width = progress + "%";
                         display.innerText = detected;
                         statusMsg.innerText = `HOLDING... ${Math.round(progress)}%`;
-
                         if (elapsed >= HOLD_DURATION) {
                             runCommand(detected);
                             isLocked = true;
@@ -142,7 +144,6 @@
                     } else {
                         progBar.style.width = "100%";
                         display.innerHTML = `<span style="color:#00ffcc;">✓ EXECUTED</span>`;
-                        statusMsg.innerText = "RELEASE HAND TO RESET";
                     }
                 } else {
                     activeGesture = detected;
@@ -155,26 +156,23 @@
                 isLocked = false;
                 progBar.style.width = "0%";
                 display.innerText = "READY";
-                statusMsg.innerText = "WAITING FOR INPUT";
+                statusMsg.innerText = "WAITING FOR GESTURE";
             }
         });
 
-        /* --- 4. WORLD-AXIS ROTATION --- */
         function runCommand(cmd) {
             const angle = Math.PI / 2;
             const q = new THREE.Quaternion();
-            
             if (cmd === "ROTATE LEFT") q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), -angle);
             if (cmd === "ROTATE RIGHT") q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), angle);
             if (cmd === "ROTATE UP") q.setFromAxisAngle(new THREE.Vector3(1, 0, 0), -angle);
             if (cmd === "ROTATE DOWN") q.setFromAxisAngle(new THREE.Vector3(1, 0, 0), angle);
 
             targetQuaternion.multiplyQuaternions(q, targetQuaternion);
-            
             if (cmd === "ZOOM IN") targetZoom = Math.max(2, targetZoom - 2);
             if (cmd === "ZOOM OUT") targetZoom = Math.min(12, targetZoom + 2);
 
-            renderer.domElement.style.filter = "brightness(2.0)";
+            renderer.domElement.style.filter = "brightness(2)";
             setTimeout(() => renderer.domElement.style.filter = "brightness(1)", 150);
         }
 
